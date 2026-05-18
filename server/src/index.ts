@@ -7,6 +7,7 @@ import { config } from "./config";
 import { disconnectDb } from "./db";
 import authPlugin from "./plugins/auth";
 import authRoutes from "./routes/auth";
+import socialRoutes from "./routes/social";
 import locationRoutes from "./routes/location";
 import weatherRoutes from "./routes/weather";
 import preferencesRoutes from "./routes/preferences";
@@ -28,6 +29,7 @@ async function buildServer() {
 
   await app.register(authPlugin);
   await app.register(authRoutes);
+  await app.register(socialRoutes);
   await app.register(locationRoutes);
   await app.register(weatherRoutes);
   await app.register(preferencesRoutes);

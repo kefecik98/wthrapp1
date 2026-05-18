@@ -61,18 +61,23 @@ app/
     preferences.tsx    event toggles, lead time, rain intensity, notifs
 ```
 
-## Social auth — SERVER WORK REQUIRED
+## Social auth — implemented
 
-The login screen has Apple (real `expo-apple-authentication` button on
-iOS) and Google buttons, but the backend does **not** implement them yet.
-To finish social auth:
+End to end: the login screen's Apple button (`expo-apple-authentication`,
+iOS) and Google button (`expo-auth-session` id_token flow) send the
+provider token to `POST /auth/apple` / `POST /auth/google`, which verify
+it server-side, find-or-create the user, and return our JWT pair.
+`users.password_hash` is now nullable for social-only accounts.
 
-- Backend: add `POST /auth/apple` and `POST /auth/google` that verify the
-  provider identity token, find-or-create the user, and return a JWT pair.
-- DB/spec: make `users.password_hash` nullable for social-only accounts.
-- Google: add OAuth client IDs + an `expo-auth-session` flow (the button
-  currently shows a "not wired up" alert; Apple calls the missing endpoint
-  and surfaces a clear message on 404).
+Remaining to make it live (config, not code):
+
+- **Google client IDs:** set `EXPO_PUBLIC_GOOGLE_*` here and the matching
+  `GOOGLE_CLIENT_IDS` on the backend. Until set, the Google button shows
+  an informative alert (no fake flow).
+- **Apple:** set `APPLE_CLIENT_ID` (app bundle id) on the backend.
+- **Known limitation:** accounts are matched by verified email. A robust
+  setup should also persist the provider `sub` (Apple private-relay
+  emails); tracked in the spec §8 follow-up.
 
 ## Running
 

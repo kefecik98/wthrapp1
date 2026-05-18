@@ -4,6 +4,8 @@
 // (see app/_layout.tsx) swaps to the authenticated tabs automatically.
 
 import * as AppleAuthentication from 'expo-apple-authentication';
+import * as Google from 'expo-auth-session/providers/google';
+import * as WebBrowser from 'expo-web-browser';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -18,6 +20,11 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useLogin, useRegister, useSocialSignIn } from '@/src/hooks/useAuth';
 import { ApiError } from '@/src/lib/api';
+import { config, googleConfigured } from '@/src/lib/config';
+
+// Required by expo-auth-session so the OAuth redirect resolves the
+// pending session when the browser hands control back to the app.
+WebBrowser.maybeCompleteAuthSession();
 
 type Mode = 'login' | 'register';
 
@@ -34,10 +41,37 @@ export default function LoginScreen() {
   const credential = mode === 'login' ? login : register;
   const busy = login.isPending || register.isPending || social.isPending;
 
+  // Google OAuth (id_token flow). request is null until configured.
+  const [, googleResponse, googlePrompt] = Google.useIdTokenAuthRequest({
+    iosClientId: config.google.iosClientId || undefined,
+    androidClientId: config.google.androidClientId || undefined,
+    webClientId: config.google.webClientId || undefined,
+  });
+
   // Apple sign-in is only offered where the OS supports it (iOS 13+).
   useEffect(() => {
     AppleAuthentication.isAvailableAsync().then(setAppleAvailable);
   }, []);
+
+  // When Google returns an id_token, exchange it for our session.
+  useEffect(() => {
+    if (googleResponse?.type === 'success') {
+      const idToken = googleResponse.params.id_token;
+      if (idToken) {
+        social.mutate(
+          { provider: 'google', idToken },
+          {
+            onError: () =>
+              Alert.alert(
+                'Google sign-in unavailable',
+                'The backend rejected Google sign-in (POST /auth/google). See client/CONTEXT.md.',
+              ),
+          },
+        );
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [googleResponse]);
 
   function submit() {
     if (!email.trim() || !password) {
@@ -83,12 +117,14 @@ export default function LoginScreen() {
   }
 
   function onGoogle() {
-    // Google sign-in needs OAuth client IDs + a backend endpoint; neither
-    // exists yet. Surface that clearly rather than faking a flow.
-    Alert.alert(
-      'Google sign-in unavailable',
-      'Google sign-in is not wired up yet (needs OAuth config + POST /auth/google). See client/CONTEXT.md.',
-    );
+    if (!googleConfigured) {
+      Alert.alert(
+        'Google sign-in unavailable',
+        'Google sign-in is not configured. Set the EXPO_PUBLIC_GOOGLE_* client IDs (see client/.env.example).',
+      );
+      return;
+    }
+    googlePrompt();
   }
 
   return (

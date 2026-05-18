@@ -35,6 +35,7 @@ src/
     auth.ts            `authenticate` preHandler -> sets request.userId
   routes/
     auth.ts            POST /auth/register | /auth/login | /auth/refresh
+    social.ts          POST /auth/apple | /auth/google (token verified)
     location.ts        PUT /location            (auth)
     weather.ts         GET /weather             (auth)
     preferences.ts     GET|PUT /preferences     (auth)
@@ -44,6 +45,8 @@ src/
   services/
     weather.ts         Tomorrow.io client + findNextEvent threshold logic
     push.ts            lazy FCM init + sendPush
+    appleAuth.ts       verify Apple identity token (JWKS)
+    googleAuth.ts      verify Google id_token (google-auth-library)
   engine/
     alertEngine.ts     cron cycle: active users -> grid cluster -> forecast
                        -> match -> dedup via alert_log -> FCM push

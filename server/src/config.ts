@@ -41,6 +41,18 @@ export const config = {
     webhookSecret: required("REVENUECAT_WEBHOOK_SECRET"),
   },
 
+  // Optional: only needed if social sign-in is enabled. The /auth/apple and
+  // /auth/google routes return 501 when their value here is empty.
+  social: {
+    // Apple identity tokens carry the app's bundle id as the `aud` claim.
+    appleClientId: process.env.APPLE_CLIENT_ID ?? "",
+    // Comma-separated list of accepted Google OAuth client IDs (audiences).
+    googleClientIds: (process.env.GOOGLE_CLIENT_IDS ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+  },
+
   alertEngine: {
     cron: optional("ALERT_ENGINE_CRON", "*/2 * * * *"),
     locationStaleMinutes: Number(optional("LOCATION_STALE_MINUTES", "30")),

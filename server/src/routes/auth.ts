@@ -57,8 +57,11 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
       const email = request.body.email.toLowerCase().trim();
 
       const user = await prisma.user.findUnique({ where: { email } });
+      // user.passwordHash is null for social-only (Apple/Google) accounts —
+      // those must sign in through their provider, not with a password.
       if (
         !user ||
+        !user.passwordHash ||
         !(await verifyPassword(request.body.password, user.passwordHash))
       ) {
         return reply.code(401).send({ error: "Invalid credentials" });

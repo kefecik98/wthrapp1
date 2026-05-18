@@ -5,4 +5,17 @@
 export const config = {
   // e.g. https://api.weatheralert.example — see client/.env.example
   apiBaseUrl: process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3000",
+
+  // Google OAuth client IDs (from Google Cloud Console). Empty until
+  // configured — when empty the Google button shows an informative alert.
+  google: {
+    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID ?? "",
+    androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID ?? "",
+    webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ?? "",
+  },
 } as const;
+
+export const googleConfigured =
+  config.google.iosClientId !== "" ||
+  config.google.androidClientId !== "" ||
+  config.google.webClientId !== "";

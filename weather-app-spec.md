@@ -144,7 +144,7 @@ A real-time hyperlocal weather alert app targeting people who work outdoors (con
 users
   id              UUID PRIMARY KEY
   email           TEXT UNIQUE NOT NULL
-  password_hash   TEXT NOT NULL
+  password_hash   TEXT                  -- nullable: social-only (Apple/Google) accounts have no password
   fcm_token       TEXT                  -- FCM device push token; null until the device registers via PUT /device/token
   created_at      TIMESTAMPTZ DEFAULT now()
 
@@ -394,7 +394,11 @@ PowerEdge Rack
 ## 8. Open Questions / Next Decisions
 
 1. **Tomorrow.io plan** — which tier to start on; need to estimate call volume based on target initial user count
-2. **Mobile auth** — email/password only, or add Apple Sign-In (required by App Store if any social login is offered) / Google Sign-In
+2. **Mobile auth** — RESOLVED: email/password + Apple + Google. Server
+   exposes `POST /auth/register|login|refresh|apple|google`; Apple/Google
+   identity tokens are verified server-side and accounts are matched by
+   verified email. Follow-up: persist provider `sub` as a stable external
+   id (Apple may use private-relay emails); wire Google OAuth client IDs.
 3. **FCM token management** — token rotation strategy when device token changes
 4. **Free tier definition** — is there a free tier (limited alerts per day), or is it subscription-only from day one?
 5. **Background location on iOS** — Apple requires explicit justification for "always on" location permission; App Store review may push back; need a clear user-facing explanation
