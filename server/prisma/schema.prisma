@@ -1,0 +1,90 @@
+// Prisma schema for WeatherAlert.
+// Mirrors the SQL schema in weather-app-spec.md section 5.
+// snake_case table/column names are mapped so the database stays
+// consistent with the spec while the TypeScript code uses camelCase.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Core user record.
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  // FCM device token, used by the alert engine to deliver push.
+  // (Referenced by the spec's alert engine; added here explicitly.)
+  fcmToken     String?  @map("fcm_token")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  subscription Subscription?
+  location     UserLocation?
+  preferences  UserPreferences?
+  alertLogs    AlertLog[]
+
+  @@map("users")
+}
+
+// Subscription state, kept in sync via RevenueCat webhooks.
+model Subscription {
+  id               String    @id @default(uuid()) @db.Uuid
+  userId           String    @unique @map("user_id") @db.Uuid
+  status           String // 'active' | 'cancelled' | 'expired' | 'trial'
+  plan             String? // 'monthly' | 'annual'
+  expiresAt        DateTime? @map("expires_at") @db.Timestamptz
+  revenuecatUserId String?   @map("revenuecat_user_id")
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("subscriptions")
+}
+
+// Last known GPS position per user.
+model UserLocation {
+  userId    String   @id @map("user_id") @db.Uuid
+  lat       Float
+  lng       Float
+  accuracyM Float?   @map("accuracy_m")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_locations")
+}
+
+// Per-user alert configuration.
+model UserPreferences {
+  userId           String  @id @map("user_id") @db.Uuid
+  alertLeadMin     Int     @default(10) @map("alert_lead_min")
+  alertRain        Boolean @default(true) @map("alert_rain")
+  alertSnow        Boolean @default(true) @map("alert_snow")
+  alertHail        Boolean @default(true) @map("alert_hail")
+  alertThunder     Boolean @default(true) @map("alert_thunder")
+  alertWind        Boolean @default(false) @map("alert_wind")
+  minRainIntensity String  @default("light") @map("min_rain_intensity") // 'light' | 'moderate' | 'heavy'
+  notificationsOn  Boolean @default(true) @map("notifications_on")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_preferences")
+}
+
+// Deduplication log — prevents repeat alerts for the same event.
+model AlertLog {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  eventType    String   @map("event_type") // 'rain' | 'snow' | 'hail' | 'thunder' | 'wind'
+  eventStartAt DateTime @map("event_start_at") @db.Timestamptz
+  sentAt       DateTime @default(now()) @map("sent_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, eventType, eventStartAt])
+  @@map("alert_log")
+}

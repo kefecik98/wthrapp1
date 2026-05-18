@@ -1,0 +1,28 @@
+# Local development PostgreSQL for WeatherAlert.
+# Spec infrastructure section lists Docker Compose as the recommended way
+# to isolate services. This brings up the database that the server's
+# DATABASE_URL expects so the Prisma migration can be applied:
+#
+#   docker compose up -d
+#   npx prisma migrate deploy   # applies prisma/migrations
+#
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: weather
+      POSTGRES_PASSWORD: weather
+      POSTGRES_DB: weather_app
+    ports:
+      - "5432:5432"
+    volumes:
+      - weather_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U weather -d weather_app"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  weather_pgdata:
