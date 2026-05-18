@@ -9,10 +9,11 @@ paywall, and receives push notifications fired by the backend. Built from
 
 ## Status
 
-**Scaffolded.** Generated with the official `create-expo-app` default
-template (Expo SDK 54, expo-router, TypeScript), then the integration
-layer below was added. `npx tsc --noEmit` passes. Not yet run against a
-simulator/device in this environment — UI behaviour is unverified.
+**Scaffolded + core screens built.** Generated with the official
+`create-expo-app` default template (Expo SDK 54, expo-router, TypeScript),
+then the integration layer and core screens were added. `npx tsc --noEmit`
+passes. Not yet run against a simulator/device in this environment — UI
+behaviour is unverified. The paywall is still TODO.
 
 ## Stack (spec §3, now resolved)
 
@@ -41,14 +42,37 @@ src/
     location.ts      background location task -> PUT /location
     push.ts          device push token -> PUT /device/token
   hooks/
-    useAuth.ts       useRegister / useLogin / useSignOut
+    useAuth.ts       useRegister / useLogin / useSocialSignIn / useSignOut
     useWeather.ts    useWeather / usePreferences / useUpdatePreferences
   Providers.tsx      QueryClientProvider + startup session hydration
 ```
 
-`Providers` is mounted at the top of `app/_layout.tsx`. Screens (login,
-home, preferences, paywall) are **not built yet** — the data/services
-plumbing they need is ready to consume.
+## Screens (`app/`, expo-router)
+
+```
+app/
+  _layout.tsx          Providers + auth gate: Stack.Protected routes
+                       (tabs) when authed, login when not; splash while
+                       the session hydrates (spec §6.1)
+  login.tsx            email/password (login+register) + Apple/Google UI
+  (tabs)/
+    _layout.tsx        Home + Alerts tabs
+    index.tsx          Home: permission prompts + 60-min forecast + sign-out
+    preferences.tsx    event toggles, lead time, rain intensity, notifs
+```
+
+## Social auth — SERVER WORK REQUIRED
+
+The login screen has Apple (real `expo-apple-authentication` button on
+iOS) and Google buttons, but the backend does **not** implement them yet.
+To finish social auth:
+
+- Backend: add `POST /auth/apple` and `POST /auth/google` that verify the
+  provider identity token, find-or-create the user, and return a JWT pair.
+- DB/spec: make `users.password_hash` nullable for social-only accounts.
+- Google: add OAuth client IDs + an `expo-auth-session` flow (the button
+  currently shows a "not wired up" alert; Apple calls the missing endpoint
+  and surfaces a clear message on 404).
 
 ## Running
 

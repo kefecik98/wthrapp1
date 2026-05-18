@@ -1,98 +1,153 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+// Home screen (spec §6.1 permissions + in-app weather display).
+// Prompts for location/notification permission with a clear rationale,
+// then shows the short-term forecast for the user's location.
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
+import { useQueryClient } from '@tanstack/react-query';
+import * as Location from 'expo-location';
+import { useState } from 'react';
+import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+import { useSignOut } from '@/src/hooks/useAuth';
+import { useWeather } from '@/src/hooks/useWeather';
+import { apiRequest } from '@/src/lib/api';
+import { registerForPush } from '@/src/services/push';
+import { startLocationUpdates } from '@/src/services/location';
+
+const PRECIP: Record<number, string> = {
+  0: 'Clear',
+  1: 'Rain',
+  2: 'Snow',
+  3: 'Freezing rain',
+  4: 'Hail',
+};
 
 export default function HomeScreen() {
-  return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+  const weather = useWeather();
+  const signOut = useSignOut();
+  const qc = useQueryClient();
+  const [locOn, setLocOn] = useState(false);
+  const [pushOn, setPushOn] = useState(false);
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
+  async function enableLocation() {
+    const ok = await startLocationUpdates();
+    if (!ok) {
+      Alert.alert(
+        'Location needed',
+        'WeatherAlert needs background location to warn you about weather at your exact spot. Enable it in Settings.',
+      );
+      return;
+    }
+    setLocOn(true);
+    // Post one fix immediately so the forecast works without waiting for
+    // the next background update.
+    const pos = await Location.getCurrentPositionAsync({});
+    await apiRequest('/location', {
+      method: 'PUT',
+      body: {
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude,
+        accuracy: pos.coords.accuracy ?? undefined,
+      },
+    });
+    qc.invalidateQueries({ queryKey: ['weather'] });
+  }
+
+  async function enablePush() {
+    const ok = await registerForPush();
+    setPushOn(ok);
+    if (!ok) {
+      Alert.alert(
+        'Notifications off',
+        'Without notifications we cannot alert you before weather hits.',
+      );
+    }
+  }
+
+  return (
+    <ScrollView contentContainerStyle={styles.container}>
+      <ThemedText type="title">Your weather</ThemedText>
+
+      <ThemedView style={styles.card}>
+        <ThemedText type="subtitle">Setup</ThemedText>
+        <Pressable
+          style={[styles.btn, locOn && styles.btnDone]}
+          onPress={enableLocation}
+        >
+          <ThemedText style={styles.btnText}>
+            {locOn ? '✓ Location alerts on' : 'Enable location alerts'}
+          </ThemedText>
+        </Pressable>
+        <Pressable
+          style={[styles.btn, pushOn && styles.btnDone]}
+          onPress={enablePush}
+        >
+          <ThemedText style={styles.btnText}>
+            {pushOn ? '✓ Notifications on' : 'Enable notifications'}
+          </ThemedText>
+        </Pressable>
       </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
+
+      <ThemedView style={styles.card}>
+        <ThemedText type="subtitle">Next 60 minutes</ThemedText>
+        {weather.isLoading && <ThemedText>Loading forecast…</ThemedText>}
+        {weather.isError && (
+          <ThemedText>
+            No forecast yet. Enable location alerts above to start.
+          </ThemedText>
+        )}
+        {weather.data && (
+          <>
+            <ThemedText style={styles.muted}>
+              Updated {new Date(weather.data.updatedAt).toLocaleTimeString()}
+            </ThemedText>
+            {weather.data.minutely.slice(0, 12).map((m) => {
+              const type = PRECIP[m.values.precipitationType] ?? '—';
+              return (
+                <View key={m.time} style={styles.row}>
+                  <ThemedText>
+                    {new Date(m.time).toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </ThemedText>
+                  <ThemedText>
+                    {type}
+                    {m.values.precipitationType
+                      ? `  ${m.values.precipitationIntensity.toFixed(1)} mm/hr`
+                      : ''}
+                  </ThemedText>
+                </View>
+              );
+            })}
+          </>
+        )}
       </ThemedView>
-    </ParallaxScrollView>
+
+      <Pressable style={styles.signOut} onPress={() => signOut()}>
+        <ThemedText type="link">Sign out</ThemedText>
+      </Pressable>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
+  container: { padding: 20, paddingTop: 64, gap: 16 },
+  card: { borderRadius: 12, padding: 16, gap: 10 },
+  btn: {
+    backgroundColor: '#0a7ea4',
+    borderRadius: 8,
+    paddingVertical: 12,
     alignItems: 'center',
-    gap: 8,
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+  btnDone: { backgroundColor: '#2e7d32' },
+  btnText: { color: '#fff', fontWeight: '600' },
+  muted: { opacity: 0.6 },
+  row: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 4,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
-  },
+  signOut: { alignItems: 'center', marginTop: 8 },
 });
