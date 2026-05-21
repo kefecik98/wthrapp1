@@ -1,12 +1,7 @@
 // Social sign-in routes: POST /auth/apple and POST /auth/google.
-// Each verifies the provider identity token, finds-or-creates the user
-// (keyed by the provider-verified email), and returns our JWT pair.
-//
-// KNOWN LIMITATION: accounts are matched by email. Apple emails can be
-// private-relay addresses and Apple only reliably includes the email claim
-// on first authorization. A fully robust implementation would also persist
-// the provider `sub` as a stable external id (new column + migration);
-// tracked as a follow-up so this change stays focused.
+// Each verifies the provider identity token, then resolves the account by
+// the stable provider subject id (robust to Apple private-relay emails),
+// falling back to email-linking, and returns our JWT pair.
 
 import { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { prisma } from "../db";
@@ -14,25 +9,50 @@ import { signTokenPair } from "../lib/tokens";
 import { verifyAppleToken, SocialIdentity } from "../services/appleAuth";
 import { verifyGoogleToken } from "../services/googleAuth";
 
+type Provider = "apple" | "google";
+
 const bodySchema = {
   type: "object",
   required: ["idToken"],
   properties: { idToken: { type: "string", minLength: 1 } },
 } as const;
 
-// Find the user by email, or create a social-only account (no password)
-// with the usual default preferences row. Returns the user id.
-async function findOrCreateUser(email: string): Promise<string> {
-  const normalised = email.toLowerCase().trim();
-  const existing = await prisma.user.findUnique({
+// Resolve (or create) the user for a verified social identity:
+//   1. match by (provider, sub) — the stable, email-independent key;
+//   2. else link to an existing account with the same verified email;
+//   3. else create a new password-less account (needs an email).
+// Returns the user id, or null when a new account is needed but the
+// provider supplied no email.
+async function resolveSocialUser(
+  provider: Provider,
+  sub: string,
+  email?: string,
+): Promise<string | null> {
+  const bySub = await prisma.user.findFirst({
+    where: { provider, providerSub: sub },
+  });
+  if (bySub) return bySub.id;
+
+  const normalised = email?.toLowerCase().trim();
+  if (!normalised) return null;
+
+  const byEmail = await prisma.user.findUnique({
     where: { email: normalised },
   });
-  if (existing) return existing.id;
+  if (byEmail) {
+    await prisma.user.update({
+      where: { id: byEmail.id },
+      data: { provider, providerSub: sub },
+    });
+    return byEmail.id;
+  }
 
   const created = await prisma.user.create({
     data: {
       email: normalised,
       passwordHash: null,
+      provider,
+      providerSub: sub,
       preferences: { create: {} },
     },
   });
@@ -42,9 +62,9 @@ async function findOrCreateUser(email: string): Promise<string> {
 export default async function socialRoutes(
   app: FastifyInstance,
 ): Promise<void> {
-  // Shared handler: given a verifier, run the verify -> find-or-create flow.
+  // Shared handler: verify the token, then resolve the account.
   const handle =
-    (verify: (idToken: string) => Promise<SocialIdentity>) =>
+    (provider: Provider, verify: (t: string) => Promise<SocialIdentity>) =>
     async (
       request: FastifyRequest<{ Body: { idToken: string } }>,
       reply: FastifyReply,
@@ -59,25 +79,28 @@ export default async function socialRoutes(
         return reply.code(code).send({ error: message });
       }
 
-      if (!identity.email) {
-        return reply
-          .code(400)
-          .send({ error: "Provider did not supply an email address" });
+      const userId = await resolveSocialUser(
+        provider,
+        identity.sub,
+        identity.email,
+      );
+      if (!userId) {
+        return reply.code(400).send({
+          error: "Provider supplied no email for a new account",
+        });
       }
-
-      const userId = await findOrCreateUser(identity.email);
       return reply.send(signTokenPair(userId));
     };
 
   app.post<{ Body: { idToken: string } }>(
     "/auth/apple",
     { schema: { body: bodySchema } },
-    handle(verifyAppleToken),
+    handle("apple", verifyAppleToken),
   );
 
   app.post<{ Body: { idToken: string } }>(
     "/auth/google",
     { schema: { body: bodySchema } },
-    handle(verifyGoogleToken),
+    handle("google", verifyGoogleToken),
   );
 }

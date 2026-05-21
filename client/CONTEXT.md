@@ -75,9 +75,9 @@ Remaining to make it live (config, not code):
   `GOOGLE_CLIENT_IDS` on the backend. Until set, the Google button shows
   an informative alert (no fake flow).
 - **Apple:** set `APPLE_CLIENT_ID` (app bundle id) on the backend.
-- **Known limitation:** accounts are matched by verified email. A robust
-  setup should also persist the provider `sub` (Apple private-relay
-  emails); tracked in the spec §8 follow-up.
+
+Accounts are resolved server-side by the stable `(provider, provider_sub)`
+key (email-link fallback), so Apple private-relay addresses are handled.
 
 ## Running
 
@@ -107,14 +107,21 @@ refresh token against `POST /auth/refresh` when the access token expires.
 
 ## Open client-side questions (spec §8)
 
-- iOS "always on" location justification for App Store review
-- iOS push token: `getDevicePushTokenAsync()` returns the APNs token on
-  iOS, but the backend delivers via Firebase Admin (FCM). The app must be
-  wired to Firebase (google-services / GoogleService-Info) so FCM can map
-  APNs -> FCM. Documented in `src/services/push.ts`; integration TODO.
-- Auth method: email/password only vs. adding Apple/Google Sign-In
-- Push deep-link target (map / radar / forecast detail)
-- RevenueCat SDK + paywall not yet added (subscription flow TODO)
+- Location justification copy is in `app.json` (expo-location plugin
+  strings + iOS `UIBackgroundModes`). App Store review may still scrutinise
+  background location — keep the rationale screen clear.
+- iOS push via FCM: `app.json` has `expo-notifications` + a bundle id, but
+  delivery still needs the real Firebase files added and referenced —
+  `GoogleService-Info.plist` (iOS) / `google-services.json` (Android) plus
+  `ios.googleServicesFile` / `android.googleServicesFile`. BLOCKED on
+  credentials; see TODO.md.
+- RevenueCat SDK + paywall scaffolded (`app/paywall.tsx`,
+  `src/services/purchases.ts`, `useSubscription`). Needs the
+  `EXPO_PUBLIC_REVENUECAT_*` keys + store products to run; SDK is keyed to
+  our user id (decoded from the JWT) to match the RC webhook.
+
+Resolved: auth method (email/password + Apple/Google), push deep-link
+target (`app/forecast.tsx`).
 
 ## Code conventions
 

@@ -13,9 +13,19 @@ export const config = {
     androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID ?? "",
     webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ?? "",
   },
+
+  // RevenueCat public SDK keys (one per platform). Empty disables the
+  // paywall flow (the screen shows an informative message).
+  revenueCat: {
+    iosKey: process.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY ?? "",
+    androidKey: process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_KEY ?? "",
+  },
 } as const;
 
 export const googleConfigured =
   config.google.iosClientId !== "" ||
   config.google.androidClientId !== "" ||
   config.google.webClientId !== "";
+
+export const revenueCatConfigured =
+  config.revenueCat.iosKey !== "" || config.revenueCat.androidKey !== "";

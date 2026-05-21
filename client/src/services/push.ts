@@ -12,6 +12,39 @@
 import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
 import { apiRequest } from "../lib/api";
+import { useAuthStore } from "../store/auth";
+
+// Show alerts even when the app is foregrounded (this is time-critical
+// weather, not marketing) — set once at module load.
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
+
+// Data payload the alert engine attaches (server engine/alertEngine.ts).
+export interface AlertNavParams {
+  event_type?: string;
+  minutes_away?: string;
+  // Index signature so these pass straight into expo-router typed params.
+  [key: string]: string | undefined;
+}
+
+// Push the latest token to the backend (no-op when signed out).
+async function syncToken(token: string): Promise<void> {
+  if (!useAuthStore.getState().accessToken) return;
+  try {
+    await apiRequest<null>("/device/token", {
+      method: "PUT",
+      body: { fcmToken: token },
+    });
+  } catch {
+    // Best-effort; the next registration/rotation will retry.
+  }
+}
 
 export async function registerForPush(): Promise<boolean> {
   if (!Device.isDevice) return false; // simulators have no push token
@@ -24,10 +57,32 @@ export async function registerForPush(): Promise<boolean> {
   if (status !== "granted") return false;
 
   const { data: fcmToken } = await Notifications.getDevicePushTokenAsync();
-
-  await apiRequest<null>("/device/token", {
-    method: "PUT",
-    body: { fcmToken: String(fcmToken) },
-  });
+  await syncToken(String(fcmToken));
   return true;
+}
+
+// The OS can rotate the device push token at any time. Subscribe so the
+// backend always has the current token (spec §8 "FCM token management").
+// Call once at app start; remove the returned subscription on teardown.
+export function registerPushTokenListener(): Notifications.Subscription {
+  return Notifications.addPushTokenListener((token) => {
+    void syncToken(String(token.data));
+  });
+}
+
+// Fired when the user taps an alert while the app is running.
+export function registerNotificationResponseListener(
+  onTap: (params: AlertNavParams) => void,
+): Notifications.Subscription {
+  return Notifications.addNotificationResponseReceivedListener((response) => {
+    onTap(response.notification.request.content.data as AlertNavParams);
+  });
+}
+
+// The alert that cold-started the app, if any (deep-link on launch).
+export async function getInitialNotificationParams(): Promise<AlertNavParams | null> {
+  const last = await Notifications.getLastNotificationResponseAsync();
+  return last
+    ? (last.notification.request.content.data as AlertNavParams)
+    : null;
 }

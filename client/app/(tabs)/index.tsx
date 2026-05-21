@@ -9,7 +9,9 @@ import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { router } from 'expo-router';
 import { useSignOut } from '@/src/hooks/useAuth';
+import { useSubscription } from '@/src/hooks/useSubscription';
 import { useWeather } from '@/src/hooks/useWeather';
 import { apiRequest } from '@/src/lib/api';
 import { registerForPush } from '@/src/services/push';
@@ -26,6 +28,7 @@ const PRECIP: Record<number, string> = {
 export default function HomeScreen() {
   const weather = useWeather();
   const signOut = useSignOut();
+  const subscription = useSubscription();
   const qc = useQueryClient();
   const [locOn, setLocOn] = useState(false);
   const [pushOn, setPushOn] = useState(false);
@@ -123,6 +126,22 @@ export default function HomeScreen() {
             })}
           </>
         )}
+      </ThemedView>
+
+      <ThemedView style={styles.card}>
+        <ThemedText type="subtitle">Subscription</ThemedText>
+        <ThemedText style={styles.muted}>
+          {subscription.data?.isActive
+            ? 'Premium active — alerts enabled.'
+            : 'Not subscribed. Alerts require a subscription.'}
+        </ThemedText>
+        <Pressable style={styles.btn} onPress={() => router.push('/paywall')}>
+          <ThemedText style={styles.btnText}>
+            {subscription.data?.isActive
+              ? 'Manage subscription'
+              : 'Subscribe'}
+          </ThemedText>
+        </Pressable>
       </ThemedView>
 
       <Pressable style={styles.signOut} onPress={() => signOut()}>

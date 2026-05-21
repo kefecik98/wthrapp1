@@ -30,6 +30,14 @@ function RootNavigator() {
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Protected guard={isAuthed}>
         <Stack.Screen name="(tabs)" />
+        <Stack.Screen
+          name="forecast"
+          options={{ presentation: 'modal', title: 'Forecast' }}
+        />
+        <Stack.Screen
+          name="paywall"
+          options={{ presentation: 'modal', title: 'Premium' }}
+        />
       </Stack.Protected>
       <Stack.Protected guard={!isAuthed}>
         <Stack.Screen name="login" />

@@ -1,17 +1,23 @@
 {
   "expo": {
-    "name": "tmp_app",
-    "slug": "tmp_app",
+    "name": "WeatherAlert",
+    "slug": "weatheralert",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "tmpapp",
+    "scheme": "weatheralert",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.weatheralert.app",
+      "usesAppleSignIn": true,
+      "infoPlist": {
+        "UIBackgroundModes": ["location", "remote-notification"]
+      }
     },
     "android": {
+      "package": "com.weatheralert.app",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -19,7 +25,13 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "POST_NOTIFICATIONS"
+      ]
     },
     "web": {
       "output": "static",
@@ -39,7 +51,18 @@
           }
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-apple-authentication",
+      "expo-notifications",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "WeatherAlert uses your location to show the weather where you are.",
+          "locationAlwaysAndWhenInUsePermission": "WeatherAlert checks your location in the background so it can warn you before rain, snow, hail, lightning, or high wind reaches your exact spot — even when the app is closed.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

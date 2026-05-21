@@ -21,6 +21,11 @@ model User {
   // FCM device token, used by the alert engine to deliver push.
   // (Referenced by the spec's alert engine; added here explicitly.)
   fcmToken     String?  @map("fcm_token")
+  // Social identity: stable per-provider subject id ('apple' | 'google').
+  // Null for password accounts. Matching on this (not email) is robust to
+  // Apple private-relay addresses.
+  provider     String?  @map("provider")
+  providerSub  String?  @map("provider_sub")
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   subscription Subscription?
@@ -28,6 +33,7 @@ model User {
   preferences  UserPreferences?
   alertLogs    AlertLog[]
 
+  @@unique([provider, providerSub])
   @@map("users")
 }
 

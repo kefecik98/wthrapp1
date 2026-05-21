@@ -146,6 +146,8 @@ users
   email           TEXT UNIQUE NOT NULL
   password_hash   TEXT                  -- nullable: social-only (Apple/Google) accounts have no password
   fcm_token       TEXT                  -- FCM device push token; null until the device registers via PUT /device/token
+  provider        TEXT                  -- 'apple' | 'google' for social accounts; null for password accounts
+  provider_sub    TEXT                  -- stable provider subject id; UNIQUE (provider, provider_sub)
   created_at      TIMESTAMPTZ DEFAULT now()
 
 -- Subscription state, kept in sync via RevenueCat webhooks
@@ -395,11 +397,12 @@ PowerEdge Rack
 
 1. **Tomorrow.io plan** — which tier to start on; need to estimate call volume based on target initial user count
 2. **Mobile auth** — RESOLVED: email/password + Apple + Google. Server
-   exposes `POST /auth/register|login|refresh|apple|google`; Apple/Google
-   identity tokens are verified server-side and accounts are matched by
-   verified email. Follow-up: persist provider `sub` as a stable external
-   id (Apple may use private-relay emails); wire Google OAuth client IDs.
-3. **FCM token management** — token rotation strategy when device token changes
+   exposes `POST /auth/register|login|refresh|apple|google`; identity
+   tokens are verified server-side and accounts are resolved by the stable
+   `(provider, provider_sub)` key (email-link fallback). Remaining: wire
+   real Google OAuth client IDs + `APPLE_CLIENT_ID` (config, not code).
+3. **FCM token management** — RESOLVED: client re-syncs the device token on
+   rotation via `addPushTokenListener` -> `PUT /device/token`.
 4. **Free tier definition** — is there a free tier (limited alerts per day), or is it subscription-only from day one?
 5. **Background location on iOS** — Apple requires explicit justification for "always on" location permission; App Store review may push back; need a clear user-facing explanation
 6. **Alert UI** — deep link from push notification into the app (map view, radar, forecast detail?)
