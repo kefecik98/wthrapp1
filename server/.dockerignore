@@ -1,0 +1,15 @@
+node_modules
+dist
+.env
+.env.*
+!.env.example
+npm-debug.log*
+.git
+.gitignore
+.vscode
+.idea
+*.md
+!prisma/**/*.md
+coverage
+.DS_Store
+firebase-service-account.json
