@@ -80,10 +80,17 @@ export async function fetchMinutely(
     );
   }
 
+  // Tomorrow.io's /timelines keys each interval by `startTime`; the matcher
+  // reads `time`, so normalise here rather than leak the API shape inward.
   const body = (await res.json()) as {
-    data?: { timelines?: { intervals?: TomorrowMinute[] }[] };
+    data?: {
+      timelines?: {
+        intervals?: { startTime: string; values: TomorrowMinute["values"] }[];
+      }[];
+    };
   };
-  return body.data?.timelines?.[0]?.intervals ?? [];
+  const intervals = body.data?.timelines?.[0]?.intervals ?? [];
+  return intervals.map((i) => ({ time: i.startTime, values: i.values }));
 }
 
 /**
