@@ -19,6 +19,10 @@ export async function buildServer(): Promise<FastifyInstance> {
     // Quiet during tests; production boot turns the logger back on.
     logger: config.env !== "test",
     bodyLimit: 1_048_576,
+    // Fastify's Ajv defaults to removeAdditional:true, which silently strips
+    // unknown body fields. We want `additionalProperties:false` schemas to
+    // *reject* unknown fields with a 400 instead (validate at the boundary).
+    ajv: { customOptions: { removeAdditional: false } },
   });
 
   app.get("/health", async () => ({ status: "ok" }));
