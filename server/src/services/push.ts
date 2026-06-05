@@ -49,6 +49,12 @@ export interface PushMessage {
   data?: Record<string, string>;
 }
 
+// Android delivers alerts on this dedicated channel; it MUST match
+// WEATHER_ALERT_CHANNEL_ID created client-side (client/src/services/push.ts),
+// or Android uses a default channel and the custom vibration/importance the
+// client configured are ignored.
+const ANDROID_ALERT_CHANNEL_ID = "weather-alerts";
+
 /**
  * Send a single push notification.
  * Returns true on success, false if push is not configured or the send fails.
@@ -62,6 +68,14 @@ export async function sendPush(message: PushMessage): Promise<boolean> {
         token: message.token,
         notification: { title: message.title, body: message.body },
         data: message.data,
+        // Time-critical weather: deliver promptly, on the dedicated channel so
+        // the client's heads-up importance + vibration apply. The channel owns
+        // the vibration pattern on Android 8+, so none is set here.
+        android: {
+          priority: "high",
+          notification: { channelId: ANDROID_ALERT_CHANNEL_ID, sound: "default" },
+        },
+        apns: { payload: { aps: { sound: "default" } } },
       }),
       SEND_TIMEOUT_MS,
       "[push] send",

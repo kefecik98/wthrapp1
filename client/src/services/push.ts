@@ -10,10 +10,51 @@
 // APNs -> FCM. Tracked as an integration follow-up, not solved by scaffold.
 
 import * as Device from "expo-device";
+import * as Haptics from "expo-haptics";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import { apiRequest } from "../lib/api";
 import { useAuthStore } from "../store/auth";
+
+// Android delivers weather alerts on this dedicated, high-importance channel.
+// The id MUST match the channelId the server stamps on the FCM payload
+// (server/src/services/push.ts) — otherwise Android falls back to a default
+// channel and the vibration/importance below are ignored.
+export const WEATHER_ALERT_CHANNEL_ID = "weather-alerts";
+
+// Distinctive buzz so a weather warning feels unlike an ordinary notification:
+// two short pulses then a long one. Pattern is [wait, vibrate, wait, vibrate…].
+const ALERT_VIBRATION_PATTERN = [0, 300, 150, 300, 150, 600];
+
+/**
+ * Create the weather-alert notification channel (Android only; no-op elsewhere).
+ * Must exist before any alert arrives. Safe to call repeatedly, but note
+ * Android locks a channel's sound + importance after first creation — changing
+ * them later needs a new channel id or an app reinstall.
+ */
+export async function ensureAndroidChannelAsync(): Promise<void> {
+  if (Platform.OS !== "android") return;
+  await Notifications.setNotificationChannelAsync(WEATHER_ALERT_CHANNEL_ID, {
+    name: "Weather alerts",
+    importance: Notifications.AndroidImportance.MAX, // heads-up banner + sound
+    sound: "default",
+    vibrationPattern: ALERT_VIBRATION_PATTERN,
+    enableVibrate: true,
+    enableLights: true,
+    lightColor: "#0a7ea4",
+  });
+}
+
+/**
+ * Fire a haptic when an alert lands while the app is foregrounded. The OS
+ * vibrates for background/tray notifications via the channel above; this covers
+ * the in-app case, where the system shows nothing and so wouldn't vibrate.
+ */
+export function registerForegroundHaptics(): Notifications.Subscription {
+  return Notifications.addNotificationReceivedListener(() => {
+    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+  });
+}
 
 // Show alerts even when the app is foregrounded (this is time-critical
 // weather, not marketing) — set once at module load.
@@ -51,6 +92,9 @@ export async function registerForPush(): Promise<boolean> {
   // iOS simulators cannot obtain a push token, but Android emulators with
   // Google Play Services can — so only bail on the iOS simulator.
   if (!Device.isDevice && Platform.OS === "ios") return false;
+
+  // Ensure the channel exists before the first alert can arrive.
+  await ensureAndroidChannelAsync();
 
   const existing = await Notifications.getPermissionsAsync();
   let status = existing.status;

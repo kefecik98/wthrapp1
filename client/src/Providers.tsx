@@ -9,7 +9,9 @@ import { queryClient } from "./lib/queryClient";
 import { decodeJwtSub } from "./lib/jwt";
 import { configurePurchases } from "./services/purchases";
 import {
+  ensureAndroidChannelAsync,
   getInitialNotificationParams,
+  registerForegroundHaptics,
   registerNotificationResponseListener,
   registerPushTokenListener,
 } from "./services/push";
@@ -29,10 +31,16 @@ export function Providers({ children }: PropsWithChildren) {
     if (accessToken) configurePurchases(decodeJwtSub(accessToken));
   }, [accessToken]);
 
-  // Keep the backend's FCM token current if the OS rotates it.
+  // Keep the backend's FCM token current if the OS rotates it. Also create the
+  // Android alert channel up front and buzz on foreground alerts.
   useEffect(() => {
-    const sub = registerPushTokenListener();
-    return () => sub.remove();
+    void ensureAndroidChannelAsync();
+    const tokenSub = registerPushTokenListener();
+    const hapticSub = registerForegroundHaptics();
+    return () => {
+      tokenSub.remove();
+      hapticSub.remove();
+    };
   }, []);
 
   // Deep-link a tapped weather alert to the forecast detail screen,
