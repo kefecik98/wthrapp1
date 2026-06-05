@@ -11,6 +11,7 @@
 
 import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
+import { Platform } from "react-native";
 import { apiRequest } from "../lib/api";
 import { useAuthStore } from "../store/auth";
 
@@ -47,7 +48,9 @@ async function syncToken(token: string): Promise<void> {
 }
 
 export async function registerForPush(): Promise<boolean> {
-  if (!Device.isDevice) return false; // simulators have no push token
+  // iOS simulators cannot obtain a push token, but Android emulators with
+  // Google Play Services can — so only bail on the iOS simulator.
+  if (!Device.isDevice && Platform.OS === "ios") return false;
 
   const existing = await Notifications.getPermissionsAsync();
   let status = existing.status;

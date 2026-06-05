@@ -35,6 +35,8 @@ export const config = {
   tomorrow: {
     apiKey: required("TOMORROW_API_KEY"),
     baseUrl: optional("TOMORROW_BASE_URL", "https://api.tomorrow.io/v4"),
+    // Abort a forecast request that hangs, so it can't stall an alert cycle.
+    timeoutMs: Number(optional("TOMORROW_TIMEOUT_MS", "10000")),
   },
 
   revenueCat: {

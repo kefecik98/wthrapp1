@@ -112,13 +112,25 @@ export async function runAlertCycle(): Promise<void> {
 }
 
 let task: ScheduledTask | null = null;
+// Guards against overlapping runs: node-cron will fire the next tick even if the
+// previous cycle is still in flight (e.g. a slow upstream), so without this a
+// hung cycle would let runs pile up. Direct callers (tests, trigger_cycle) are
+// intentionally not guarded.
+let cycleRunning = false;
 
 /** Start the recurring alert engine. */
 export function startAlertEngine(): void {
   task = cron.schedule(config.alertEngine.cron, () => {
-    runAlertCycle().catch((err) =>
-      console.error("[alert-engine] cycle failed:", err),
-    );
+    if (cycleRunning) {
+      console.warn("[alert-engine] previous cycle still running — skipping tick");
+      return;
+    }
+    cycleRunning = true;
+    runAlertCycle()
+      .catch((err) => console.error("[alert-engine] cycle failed:", err))
+      .finally(() => {
+        cycleRunning = false;
+      });
   });
   console.log(
     `[alert-engine] scheduled with cron "${config.alertEngine.cron}"`,

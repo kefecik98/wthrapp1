@@ -73,7 +73,10 @@ export async function fetchMinutely(
   url.searchParams.set("units", "metric");
   url.searchParams.set("apikey", config.tomorrow.apiKey);
 
-  const res = await fetch(url, { method: "GET" });
+  const res = await fetch(url, {
+    method: "GET",
+    signal: AbortSignal.timeout(config.tomorrow.timeoutMs),
+  });
   if (!res.ok) {
     throw new Error(
       `Tomorrow.io request failed: ${res.status} ${res.statusText}`,

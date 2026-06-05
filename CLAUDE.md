@@ -21,7 +21,8 @@ Monorepo with two independent npm projects:
 - `server/` — Node.js 22 + Fastify 5 + Prisma 6 + PostgreSQL. REST API plus an in-process `node-cron` alert engine.
 - `client/` — React Native + Expo (SDK 54) + expo-router, TypeScript, single codebase that must compile and run on iOS and Android.
 - `server/deploy/` — production deploy runbook (`DEPLOY.md`) + PM2 ecosystem + Nginx config for the Proxmox rack target (spec §7). `server/Dockerfile` is a fallback containerized path.
-- `weather-app-spec.md` — authoritative product/architecture spec.
+- `weather-app-spec.md` — authoritative product/architecture spec (detailed; ~400 lines).
+- `CONTEXT.md` (repo root) — condensed orientation: product summary, tech stack, plus "What good looks like" / "What to avoid" guidance not in the spec.
 - `TODO.md` — living tracker of open work, blocked items (env/credentials), and pending product decisions.
 - `ACCOUNTS.md` — external accounts/credentials map: which service each env var consumes, signup cost, and free-tier limits.
 - `.github/workflows/ci.yml` — CI runs server typecheck + tests (against a real Postgres service) and client typecheck + lint + jest on push/PR. CI also enforces Prisma migration drift via `prisma migrate diff --exit-code`, so any `schema.prisma` change requires a committed migration alongside it.
@@ -79,6 +80,8 @@ The client and server cooperate to deliver one thing: a push notification fired 
    - dedupes by inserting into `alert_log` — the `UNIQUE (user_id, event_type, event_start_at)` constraint *is* the dedup; a duplicate insert throws and the alert is silently skipped,
    - sends the FCM push via `src/services/push.ts`.
 
+   Resilience invariants (keep these intact): a slow tick can't pile up — `startAlertEngine` skips a cron tick if the previous cycle is still running (direct callers like tests are intentionally unguarded). Both external calls are time-bounded so one hang can't stall a cycle: the Tomorrow.io fetch via `config.tomorrow.timeoutMs` (`TOMORROW_TIMEOUT_MS`), and each FCM send via an internal 10s cap in `push.ts`.
+
 4. **Social auth**: Apple and Google identity tokens are verified server-side (`src/services/appleAuth.ts` via JWKS, `src/services/googleAuth.ts` via `google-auth-library`). Accounts resolve by the stable `(provider, provider_sub)` key with an email-link fallback, so Apple private-relay addresses are handled. `users.password_hash` is nullable for social-only accounts.
 
 5. **Subscriptions**: client uses RevenueCat SDK (`client/src/services/purchases.ts`, keyed to the JWT-decoded user id). Server keeps `subscriptions` rows in sync from `POST /webhooks/revenuecat`. The webhook auth is a static Authorization-header shared secret (RevenueCat's documented model — *no* HMAC); `REVENUECAT_WEBHOOK_SECRET` must equal the header value set in the RevenueCat dashboard.
@@ -97,4 +100,4 @@ The client and server cooperate to deliver one thing: a push notification fired 
 - `@/*` path alias resolves to the client root.
 - Background location task lives in `src/services/location.ts` and reads tokens directly from `tokenStore` (it runs outside React).
 - Push token registration uses `addPushTokenListener` to re-sync to `PUT /device/token` on rotation (`src/services/push.ts`, wired in `src/Providers.tsx`).
-- Firebase config files (`GoogleService-Info.plist` / `google-services.json`) and the matching `app.json` entries are required for real push delivery; they are not in the repo (see `TODO.md`).
+- Firebase config files (`GoogleService-Info.plist` / `google-services.json`) and the matching `app.json` entries are required for real push delivery. They are gitignored (not committed) but exist locally; the server side reads `firebase-service-account.json` via `GOOGLE_APPLICATION_CREDENTIALS`. See `TODO.md` for credential status.
