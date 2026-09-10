@@ -11,6 +11,7 @@ import locationRoutes from "./routes/location";
 import weatherRoutes from "./routes/weather";
 import preferencesRoutes from "./routes/preferences";
 import deviceRoutes from "./routes/device";
+import accountRoutes from "./routes/account";
 import webhookRoutes from "./routes/webhooks";
 import devRoutes from "./routes/dev";
 
@@ -34,6 +35,7 @@ export async function buildServer(): Promise<FastifyInstance> {
   await app.register(weatherRoutes);
   await app.register(preferencesRoutes);
   await app.register(deviceRoutes);
+  await app.register(accountRoutes);
   await app.register(webhookRoutes);
 
   if (config.env !== "production") {

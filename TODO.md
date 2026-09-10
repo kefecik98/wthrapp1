@@ -19,14 +19,16 @@ credential · `(DECISION)` needs a product decision from K.
       `ALERT_ENGINE_CRON`).
 - [ ] **Account deletion** (store rejection blocker — Apple 5.1.1(v) + Google
       Play Data Deletion; required for any app that supports account creation).
-      Build: a server `DELETE` endpoint (deleting the `users` row cascades to
-      location, preferences, alert_log, and subscriptions via the existing FK
-      `onDelete: Cascade`, and the FCM token lives on the user row so it goes
-      too), client UI to trigger it (with a confirm step), and a publicly
-      reachable web page for deletion requests. Session invalidation is already
-      handled — `authenticate` and `/auth/refresh` reject tokens once the user
-      is gone — so no extra token work is needed. No external blocker; only the
-      store-form wiring waits for launch (see Phase 5).
+      - [x] Server `DELETE /account` endpoint — deleting the `users` row
+            cascades to location, preferences, alert_log, and subscriptions
+            via the existing FK `onDelete: Cascade`, and the FCM token lives on
+            the user row so it goes too. Session invalidation is automatic —
+            once the row is gone, `authenticate` and `/auth/refresh` reject the
+            deleted user's tokens (user-not-found). Route + 3 integration tests
+            (`src/routes/account.ts`, `account.test.ts`).
+      - [ ] Client UI to trigger it (with a confirm step).
+      - [ ] Publicly reachable web page for deletion requests (store-form
+            wiring waits for launch — see Phase 5).
 - [ ] **Free/paid tier — client gating.** Server engine now tiers alerts
       (free = hourly rain-within-the-hour, paid = 5-min + full prefs), but the
       client still shows every preference to everyone. Gate the preferences
