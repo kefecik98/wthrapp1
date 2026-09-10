@@ -4,6 +4,7 @@
 
 import { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import fp from "fastify-plugin";
+import { prisma } from "../db";
 import { verifyAccessToken } from "../lib/tokens";
 
 // Augment Fastify types so `request.userId` and `app.authenticate` are typed.
@@ -34,7 +35,17 @@ async function authPlugin(app: FastifyInstance): Promise<void> {
 
       try {
         const payload = verifyAccessToken(header.slice("Bearer ".length));
-        request.userId = payload.sub;
+        // Confirm the user still exists and the token hasn't been revoked:
+        // tokenVersion is bumped on logout-all / password change / account
+        // deletion, which invalidates every token issued before the bump.
+        const user = await prisma.user.findUnique({
+          where: { id: payload.sub },
+          select: { id: true, tokenVersion: true },
+        });
+        if (!user || user.tokenVersion !== payload.tv) {
+          return reply.code(401).send({ error: "Invalid or expired token" });
+        }
+        request.userId = user.id;
       } catch {
         return reply.code(401).send({ error: "Invalid or expired token" });
       }

@@ -45,7 +45,7 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
         },
       });
 
-      return reply.code(201).send(signTokenPair(user.id));
+      return reply.code(201).send(signTokenPair(user.id, user.tokenVersion));
     },
   );
 
@@ -67,7 +67,7 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(401).send({ error: "Invalid credentials" });
       }
 
-      return reply.send(signTokenPair(user.id));
+      return reply.send(signTokenPair(user.id, user.tokenVersion));
     },
   );
 
@@ -86,7 +86,19 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       try {
         const payload = verifyRefreshToken(request.body.refreshToken);
-        return reply.send(signTokenPair(payload.sub));
+        // Reject if the user was deleted or their tokens were revoked since
+        // this refresh token was issued — otherwise a stale or leaked refresh
+        // token could keep minting access tokens indefinitely.
+        const user = await prisma.user.findUnique({
+          where: { id: payload.sub },
+          select: { id: true, tokenVersion: true },
+        });
+        if (!user || user.tokenVersion !== payload.tv) {
+          return reply
+            .code(401)
+            .send({ error: "Invalid or expired refresh token" });
+        }
+        return reply.send(signTokenPair(user.id, user.tokenVersion));
       } catch {
         return reply
           .code(401)

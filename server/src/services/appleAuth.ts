@@ -54,8 +54,16 @@ export async function verifyAppleToken(
     );
   });
 
+  // Apple sends email_verified as the string "true" (sometimes boolean true).
+  // Only trust a verified address — creating or linking an account on an
+  // unverified email is an account-takeover vector.
+  const emailVerified =
+    payload.email_verified === true || payload.email_verified === "true";
   return {
     sub: String(payload.sub),
-    email: typeof payload.email === "string" ? payload.email : undefined,
+    email:
+      emailVerified && typeof payload.email === "string"
+        ? payload.email
+        : undefined,
   };
 }

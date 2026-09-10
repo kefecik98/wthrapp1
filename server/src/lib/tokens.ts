@@ -7,6 +7,7 @@ import { config } from "../config";
 
 export interface TokenPayload {
   sub: string; // user id
+  tv: number; // token version — must match the user's current tokenVersion
 }
 
 export interface TokenPair {
@@ -14,8 +15,8 @@ export interface TokenPair {
   refreshToken: string;
 }
 
-export function signTokenPair(userId: string): TokenPair {
-  const payload: TokenPayload = { sub: userId };
+export function signTokenPair(userId: string, tokenVersion: number): TokenPair {
+  const payload: TokenPayload = { sub: userId, tv: tokenVersion };
 
   const accessToken = jwt.sign(payload, config.jwt.accessSecret, {
     expiresIn: config.jwt.accessTtl,

@@ -4,7 +4,7 @@
 
 import { OAuth2Client } from "google-auth-library";
 import { config } from "../config";
-import { SocialIdentity } from "./appleAuth";
+import type { SocialIdentity } from "./appleAuth";
 
 const client = new OAuth2Client();
 
@@ -25,5 +25,9 @@ export async function verifyGoogleToken(
     throw new Error("Invalid Google token");
   }
 
-  return { sub: payload.sub, email: payload.email };
+  // Only trust the email if Google has verified it. Creating or linking an
+  // account on an unverified address is an account-takeover vector, so an
+  // unverified email is dropped (the caller then treats it as "no email").
+  const email = payload.email_verified ? payload.email : undefined;
+  return { sub: payload.sub, email };
 }
