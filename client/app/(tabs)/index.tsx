@@ -10,7 +10,7 @@ import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { router } from 'expo-router';
-import { useSignOut } from '@/src/hooks/useAuth';
+import { useDeleteAccount, useSignOut } from '@/src/hooks/useAuth';
 import { useSubscription } from '@/src/hooks/useSubscription';
 import { useWeather } from '@/src/hooks/useWeather';
 import { apiRequest } from '@/src/lib/api';
@@ -28,6 +28,7 @@ const PRECIP: Record<number, string> = {
 export default function HomeScreen() {
   const weather = useWeather();
   const signOut = useSignOut();
+  const deleteAccount = useDeleteAccount();
   const subscription = useSubscription();
   const qc = useQueryClient();
   const [locOn, setLocOn] = useState(false);
@@ -66,6 +67,31 @@ export default function HomeScreen() {
         'Without notifications we cannot alert you before weather hits.',
       );
     }
+  }
+
+  // Two-step confirmation before the irreversible delete. On success the
+  // mutation clears the session, which sends the app back to the login flow.
+  function confirmDeleteAccount() {
+    Alert.alert(
+      'Delete account?',
+      'This permanently deletes your account and all your data — location, ' +
+        'preferences, and alert history. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () =>
+            deleteAccount.mutate(undefined, {
+              onError: () =>
+                Alert.alert(
+                  'Could not delete account',
+                  'Something went wrong. Please try again.',
+                ),
+            }),
+        },
+      ],
+    );
   }
 
   return (
@@ -147,6 +173,16 @@ export default function HomeScreen() {
       <Pressable style={styles.signOut} onPress={() => signOut()}>
         <ThemedText type="link">Sign out</ThemedText>
       </Pressable>
+
+      <Pressable
+        style={styles.deleteAccount}
+        onPress={confirmDeleteAccount}
+        disabled={deleteAccount.isPending}
+      >
+        <ThemedText style={styles.deleteText}>
+          {deleteAccount.isPending ? 'Deleting…' : 'Delete account'}
+        </ThemedText>
+      </Pressable>
     </ScrollView>
   );
 }
@@ -169,4 +205,6 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   signOut: { alignItems: 'center', marginTop: 8 },
+  deleteAccount: { alignItems: 'center', marginTop: 4, paddingVertical: 8 },
+  deleteText: { color: '#c0392b', fontWeight: '600' },
 });

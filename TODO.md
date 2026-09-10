@@ -26,7 +26,12 @@ credential · `(DECISION)` needs a product decision from K.
             once the row is gone, `authenticate` and `/auth/refresh` reject the
             deleted user's tokens (user-not-found). Route + 3 integration tests
             (`src/routes/account.ts`, `account.test.ts`).
-      - [ ] Client UI to trigger it (with a confirm step).
+      - [x] Client UI to trigger it (with a confirm step) — "Delete account"
+            button on the home screen fires a two-step destructive `Alert`
+            confirm, then `useDeleteAccount` (DELETE /account) which clears the
+            session on success. Hook in `src/hooks/useAuth.ts`; UI +
+            confirmation in `app/(tabs)/index.tsx`; tests in
+            `src/__tests__/screens/home-delete-account.test.tsx`.
       - [ ] Publicly reachable web page for deletion requests (store-form
             wiring waits for launch — see Phase 5).
 - [ ] **Free/paid tier — client gating.** Server engine now tiers alerts
