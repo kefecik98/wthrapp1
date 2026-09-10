@@ -2,10 +2,18 @@
 // Reads/writes via the React Query hooks; each change is persisted
 // immediately with an optimistic-free PUT /preferences.
 
+import Slider from '@react-native-community/slider';
+import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Switch, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import {
+  MAX_LEAD,
+  MIN_LEAD,
+  minutesToPosition,
+  positionToMinutes,
+} from '@/src/lib/leadTime';
 import {
   Preferences,
   usePreferences,
@@ -20,7 +28,6 @@ const EVENT_TOGGLES: { key: keyof Preferences; label: string }[] = [
   { key: 'alertWind', label: 'High wind' },
 ];
 
-const LEAD_TIMES = [5, 10, 15, 30];
 const INTENSITIES: Preferences['minRainIntensity'][] = [
   'light',
   'moderate',
@@ -30,6 +37,13 @@ const INTENSITIES: Preferences['minRainIntensity'][] = [
 export default function PreferencesScreen() {
   const prefs = usePreferences();
   const update = useUpdatePreferences();
+
+  // Live lead-time value shown while dragging the slider, before it's saved.
+  // Kept in sync with the persisted value whenever preferences (re)load.
+  const [liveLead, setLiveLead] = useState<number | null>(null);
+  useEffect(() => {
+    if (prefs.data) setLiveLead(prefs.data.alertLeadMin);
+  }, [prefs.data]);
 
   function set<K extends keyof Preferences>(key: K, value: Preferences[K]) {
     update.mutate({ [key]: value } as Partial<Preferences>);
@@ -70,16 +84,30 @@ export default function PreferencesScreen() {
       </ThemedView>
 
       <ThemedView style={styles.card}>
-        <ThemedText type="subtitle">Warn me this far ahead</ThemedText>
-        <View style={styles.chips}>
-          {LEAD_TIMES.map((min) => (
-            <Chip
-              key={min}
-              label={`${min} min`}
-              active={p.alertLeadMin === min}
-              onPress={() => set('alertLeadMin', min)}
-            />
-          ))}
+        <View style={styles.row}>
+          <ThemedText type="subtitle">Warn me this far ahead</ThemedText>
+          <ThemedText type="defaultSemiBold">
+            {liveLead ?? p.alertLeadMin} min
+          </ThemedText>
+        </View>
+        <Slider
+          // The track is a plain 0..1; leadTime.ts maps position <-> minutes so
+          // the first 15 min occupy the left half (fine 1-min steps) and 15-60
+          // min the right half (5-min steps). Persist only when the drag ends.
+          minimumValue={0}
+          maximumValue={1}
+          value={minutesToPosition(p.alertLeadMin)}
+          onValueChange={(pos) => setLiveLead(positionToMinutes(pos))}
+          onSlidingComplete={(pos) =>
+            set('alertLeadMin', positionToMinutes(pos))
+          }
+          minimumTrackTintColor="#0a7ea4"
+          maximumTrackTintColor="#ccc"
+          thumbTintColor="#0a7ea4"
+        />
+        <View style={styles.row}>
+          <ThemedText style={styles.muted}>{MIN_LEAD} min</ThemedText>
+          <ThemedText style={styles.muted}>{MAX_LEAD} min</ThemedText>
         </View>
       </ThemedView>
 
@@ -138,6 +166,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
+  muted: { opacity: 0.6 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {
     borderWidth: 1,
