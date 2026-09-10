@@ -124,6 +124,13 @@ RevenueCat webhook). Runbook: `server/deploy/DEPLOY.md`.
       an inbound-reachable IP (not CGNAT) — if CGNAT, use a tunnel (Cloudflare
       Tunnel / Tailscale Funnel) instead of port-forwarding.
 - [ ] (BLOCKED) Postgres backups — `pg_dump` cron at minimum, shipped off-box.
+- [x] CI/CD deploy pipeline built (self-hosted-runner model). `deploy` job in
+      `.github/workflows/ci.yml` runs on push to `main`, gated `needs: server`
+      (tests must pass) + `if:` main-only, on a `self-hosted` runner; it runs
+      `server/deploy/deploy.sh` (sync → npm ci → migrate deploy → build → pm2
+      reload → health check). No inbound reachability needed. Runner install +
+      first activation are documented in DEPLOY.md §8 but (BLOCKED) on the app
+      VM existing.
 - [ ] Point the client's API base URL at the production HTTPS endpoint.
 
 ## Security hardening (pre-launch)

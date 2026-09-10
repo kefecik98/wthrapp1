@@ -145,10 +145,26 @@ sudo systemctl list-timers | grep certbot
 
 ---
 
-## 5. Updates (recurring)
+## 5. Updates (recurring) — automated via CI/CD
 
-From your dev machine, push to `main` (CI must be green). Then on the app
-VM:
+Once the self-hosted runner is set up (§8), **deploys are automatic**: push
+to `main`, the server tests run on GitHub's cloud, and if they pass the
+`deploy` job runs on the rack and ships the change. You don't SSH in for a
+normal release.
+
+What the pipeline does on the VM is exactly the manual sequence below,
+wrapped in `server/deploy/deploy.sh` (sync to `origin/main` → `npm ci` →
+`prisma migrate deploy` → `npm run build` → `pm2 startOrReload` → health
+check). See `.github/workflows/ci.yml`, the `deploy` job.
+
+Manual deploy (fallback — first release, or deploying without CI):
+
+```bash
+cd /opt/weatheralert/server
+bash deploy/deploy.sh          # same script the pipeline runs
+```
+
+Or the individual steps:
 
 ```bash
 cd /opt/weatheralert
@@ -164,7 +180,9 @@ pm2 reload weatheralert-api
 the cron, closing Fastify, and disconnecting Prisma before exiting.
 
 Take a Proxmox snapshot of the app VM **before** any migration that's not
-purely additive — easy rollback if the deploy goes sideways.
+purely additive — easy rollback if the deploy goes sideways. `deploy.sh`
+runs `prisma migrate deploy`, which is forward-only, but a bad migration is
+still easiest to undo from a snapshot.
 
 ---
 
@@ -208,3 +226,106 @@ is not needed in this mode.
 
 The container path is a fallback; PM2 is the canonical deploy for this
 project (see spec §7).
+
+---
+
+## 8. CI/CD — self-hosted GitHub Actions runner
+
+This is what makes `git push` to `main` deploy automatically. Read this once;
+it's the only new piece beyond the manual runbook above.
+
+### Why a self-hosted runner
+
+GitHub runs your **tests** on its own cloud machines. To **deploy**, something
+has to run commands on *this* VM. Our home rack sits behind a router that
+blocks incoming connections (and may be behind CGNAT with no public address),
+so we don't let GitHub connect *in*. Instead we install a small GitHub program
+— the *runner* — on the app VM. It connects **outbound** to GitHub and waits
+for jobs. When the `deploy` job fires, GitHub hands it to this runner, which is
+already inside the network. No port-forwarding, no public IP, no SSH keys
+stored in GitHub — that's the whole point of this choice.
+
+### Install (one time, on the app VM)
+
+Run the runner as the **same user** that owns `/opt/weatheralert` (so it can
+write the app dir and control PM2) — not root.
+
+1. In GitHub: **repo → Settings → Actions → Runners → New self-hosted runner
+   → Linux / x64.** That page shows a download block and a `./config.sh`
+   command with a one-time registration **token** baked in. Use *those* exact
+   lines (the token rotates); the steps below are the shape of it:
+
+   ```bash
+   mkdir -p ~/actions-runner && cd ~/actions-runner
+   # (copy the exact curl URL + tar line from the GitHub page)
+   curl -o actions-runner.tar.gz -L <URL_FROM_GITHUB>
+   tar xzf actions-runner.tar.gz
+   ./config.sh --url https://github.com/<owner>/<repo> --token <TOKEN_FROM_GITHUB>
+   # Accept the defaults; the default label "self-hosted" is what ci.yml targets.
+   ```
+
+2. Install it as a **service** so it starts on boot and keeps running after you
+   log out:
+
+   ```bash
+   sudo ./svc.sh install $USER
+   sudo ./svc.sh start
+   sudo ./svc.sh status      # should say "active (running)"
+   ```
+
+3. Confirm it registered: the runner shows up as **Idle** under
+   Settings → Actions → Runners.
+
+### Make sure the runner can find the tools
+
+The `deploy` job calls `git`, `npm`, `node`, `pm2`, and `curl`. These are on
+your PATH in an interactive shell, but a **service** may start with a leaner
+environment. After the first deploy, if a step fails with "command not found":
+
+- Confirm the tools exist for the runner user: `which node npm pm2 git curl`.
+- `pm2` is a global npm install; ensure the npm global bin dir is on PATH for
+  the service (e.g. add it in `~/actions-runner/.env` as `PATH=...`, then
+  `sudo ./svc.sh stop && sudo ./svc.sh start`).
+
+### How it ties together
+
+- `.github/workflows/ci.yml` has three jobs: `server` and `client` (tests, on
+  GitHub's cloud) and `deploy` (on this runner).
+- `deploy` has `needs: server` and an `if:` guard, so it runs **only** when the
+  server tests pass **and** the push is to `main`. PRs and red builds never
+  deploy.
+- `deploy` runs `server/deploy/deploy.sh` with `DEPLOY_DIR=/opt/weatheralert`.
+  That script does the §5 sequence and ends with a health check; if the app
+  isn't healthy the job goes red.
+
+### Turning the pipeline on
+
+The `deploy` job has a master on-switch so it stays dormant until the rack is
+ready: it only runs when the repo variable **`DEPLOY_ENABLED`** is `true`.
+Until then GitHub *skips* the job (it won't sit queued waiting for a runner
+that doesn't exist yet). When you're ready:
+
+**repo → Settings → Secrets and variables → Actions → Variables → New
+repository variable**, name `DEPLOY_ENABLED`, value `true`.
+
+To pause automated deploys later (e.g. during maintenance), set it back to
+`false` or delete it.
+
+### First-time ordering
+
+1. Provision the VMs and do the manual **first deploy** (§3) once, so PM2
+   knows the app and `.env` / Firebase creds are in place.
+2. Install the runner (this section, above).
+3. Set `DEPLOY_ENABLED=true`.
+
+After that, pushes to `main` deploy on their own.
+
+### Security notes
+
+- A self-hosted runner executes whatever the workflow says — keep the repo
+  **private** and be careful merging untrusted PRs (their workflow changes
+  would run on your rack).
+- The runner needs no inbound firewall rule. Keep `ufw` as in §2; outbound
+  HTTPS to GitHub is all it uses.
+- To retire a runner: `sudo ./svc.sh stop && sudo ./svc.sh uninstall`, then
+  remove it from the GitHub Runners page.
