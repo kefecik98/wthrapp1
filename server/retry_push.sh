@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-cd /home/ke/git/home/claudeLearn/workspace2/server
+cd /home/ke/git/home/claudeLearn/weatherapp/server
 for i in $(seq 1 8); do
   TOK=$(curl -s -m 8 -X POST http://localhost:3000/auth/login -H 'Content-Type: application/json' -d '{"email":"test@test.com","password":"password123"}' | python3 -c 'import sys,json;print(json.load(sys.stdin)["accessToken"])')
   curl -s -m 8 -o /dev/null -X PUT http://localhost:3000/location -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' -d '{"lat":35.68,"lng":139.69,"accuracy":10}'
