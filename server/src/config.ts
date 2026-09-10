@@ -56,7 +56,10 @@ export const config = {
   },
 
   alertEngine: {
-    cron: optional("ALERT_ENGINE_CRON", "*/2 * * * *"),
+    // Paid tier: poll cadence for active/trial subscribers (minute-precise).
+    cron: optional("ALERT_ENGINE_CRON", "*/5 * * * *"),
+    // Free tier: hourly poll for everyone else (rain within the next hour).
+    freeCron: optional("ALERT_ENGINE_FREE_CRON", "0 * * * *"),
     locationStaleMinutes: Number(optional("LOCATION_STALE_MINUTES", "30")),
   },
 } as const;

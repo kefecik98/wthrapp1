@@ -17,6 +17,27 @@ credential · `(DECISION)` needs a product decision from K.
 - [ ] Make the alert-engine cron cadence explicitly trade lead-time precision
       against call volume once the cache above lands (config already exposes
       `ALERT_ENGINE_CRON`).
+- [ ] **Account deletion** (store rejection blocker — Apple 5.1.1(v) + Google
+      Play Data Deletion; required for any app that supports account creation).
+      Build: a server `DELETE` endpoint (deleting the `users` row cascades to
+      location, preferences, alert_log, and subscriptions via the existing FK
+      `onDelete: Cascade`, and the FCM token lives on the user row so it goes
+      too), client UI to trigger it (with a confirm step), and a publicly
+      reachable web page for deletion requests. Session invalidation is already
+      handled — `authenticate` and `/auth/refresh` reject tokens once the user
+      is gone — so no extra token work is needed. No external blocker; only the
+      store-form wiring waits for launch (see Phase 5).
+- [ ] **Free/paid tier — client gating.** Server engine now tiers alerts
+      (free = hourly rain-within-the-hour, paid = 5-min + full prefs), but the
+      client still shows every preference to everyone. Gate the preferences
+      screen by `useSubscription().isActive`: free users see a rain-only view
+      with a locked upsell on event types / lead time; paid users get the full
+      set. Update paywall copy to sell the difference.
+- [ ] **Custom alert sound/vibration (paid).** New per-user sound/vibration
+      settings: needs server prefs fields + client UI. Android gotcha — a
+      notification channel's sound/importance is locked after creation, so
+      custom sounds need multiple channels (one per option), not edits to the
+      existing `weather-alerts` channel. Design before building.
 
 ---
 
@@ -39,7 +60,9 @@ movement, and the entire iOS/APNs path (untested).
       significant-change location task with real GPS movement (the emulator
       run seeded location via SQL, so that path is still unproven).
 - [ ] (BLOCKED) iOS end-to-end — untested. Needs Apple enrolment + APNs `.p8`
-      in Firebase (Phase 2) before any iOS push can route.
+      in Firebase (Phase 2) before any iOS push can route, **a physical iPhone**
+      (the simulator can't obtain a push token), and **a Mac or EAS Build** to
+      produce a signed iOS build (the local toolchain is Android-only).
 
 ## Phase 2 — External accounts (blockers; mostly free)
 
@@ -61,12 +84,15 @@ movement, and the entire iOS/APNs path (untested).
 
 ## Phase 3 — Product decisions
 
-- [ ] (DECISION) Free-tier model — limited-free vs subscription-only
-      (spec §8.4). Determines how the paywall gates features; the paywall
-      can't be finalized without it.
+- [x] (DECISION) Free-tier model — **decided: limited-free.** Free = rain
+      only, hourly poll, "rain expected within the hour"; paid = all event
+      types, 5-min poll, customizable lead time (+ planned sound/vibration).
+      Server alert-engine tiering implemented (`ALERT_ENGINE_CRON` now 5-min,
+      new `ALERT_ENGINE_FREE_CRON` hourly). Client gating still open — see the
+      free/paid client items under "Actionable now".
 - [ ] (DECISION) Tomorrow.io plan/tier — see the call-volume note below. Free
       tier is validation-only as the code stands today; the cross-cycle cache
-      (Phase 0) changes the answer.
+      (see "Actionable now") changes the answer.
 
 ## Phase 4 — Production hardening + deploy (rack, spec §7)
 
@@ -87,26 +113,79 @@ RevenueCat webhook). Runbook: `server/deploy/DEPLOY.md`.
 - [ ] (BLOCKED) Nginx reverse proxy (`server/deploy/nginx/weatheralert.conf`)
       + TLS via Certbot/Let's Encrypt (90-day auto-renew).
 - [ ] (BLOCKED) Domain or DDNS (DuckDNS/Cloudflare) → rack public IP; router
-      forwards 443 (+80 for ACME) to the Nginx VM.
+      forwards 443 (+80 for ACME) to the Nginx VM. First confirm the ISP gives
+      an inbound-reachable IP (not CGNAT) — if CGNAT, use a tunnel (Cloudflare
+      Tunnel / Tailscale Funnel) instead of port-forwarding.
 - [ ] (BLOCKED) Postgres backups — `pg_dump` cron at minimum, shipped off-box.
 - [ ] Point the client's API base URL at the production HTTPS endpoint.
 
+## Security hardening (pre-launch)
+
+From the 2026-06-15 security review. The two account-takeover / session
+findings are fixed (see Done); these are the rest, by severity. All are code,
+no external blockers.
+
+- [ ] (MEDIUM) Dev routes fail *open* in prod. `app.ts` registers dev routes
+      when `NODE_ENV !== "production"`, and `NODE_ENV` defaults to development,
+      so a missing/typo'd value exposes `POST /dev/seed-subscription` (any
+      authed user could grant themselves a subscription). Fail closed: require
+      `NODE_ENV` explicitly, or gate on a positive `ENABLE_DEV_ROUTES=true`.
+- [ ] (MEDIUM) No rate limiting. Add `@fastify/rate-limit` with a tight bucket
+      on `/auth/*` (brute-force / credential-stuffing / email enumeration) plus
+      a global default; set `trustProxy` so limits key on the real client IP
+      behind Nginx.
+- [ ] (LOW) Pin the JWT algorithm — `jwt.verify(..., { algorithms: ["HS256"] })`
+      in `lib/tokens.ts` (defensive; the social verifiers already pin RS256).
+- [ ] (LOW) Cap password length — add `maxLength: 128` to the auth schema
+      (bcrypt only uses the first 72 bytes; bound it so behaviour is explicit).
+- [ ] (LOW) Add `@fastify/helmet` (security headers); set HSTS at Nginx. Add
+      `@fastify/cors` with an allowlist only if the Expo `web` target is real.
+- [ ] (LOW) Give the RevenueCat webhook a JSON body schema (it's the only route
+      without one) so `app_user_id` / `expiration_at_ms` are validated at the
+      boundary instead of reaching Prisma untyped.
+- [ ] (LOW) `data: request.body` writes (e.g. `preferences.ts`) are safe only
+      because every write schema is `additionalProperties:false`. Document that
+      rule in `server/CLAUDE.md`, or switch to an explicit allowlist, so a
+      future sensitive column can't become mass-assignable.
+
 ## Phase 5 — Store launch
 
+Rejection blockers first — submitting without these gets the app bounced by
+review, so treat them as gating, not polish. (The account-deletion *flow*
+itself moved to "Actionable now" since it's code with no external blocker.)
+
+- [ ] List the account-deletion **web URL** in Play's Data safety form + the
+      deletion-request path in App Store review notes (build the deletion flow
+      itself in "Actionable now").
+- [ ] **Reviewer demo account (Apple rejection blocker).** The app is fully
+      login-gated, so App Review needs working demo credentials (or a demo
+      mode) in the App Store Connect review notes (Apple 2.1), or they can't
+      get past the login screen.
+- [ ] **Paywall legal disclosures (Apple rejection blocker).**
+      `app/paywall.tsx` has Restore ✓ but for auto-renewing subscriptions must
+      also show each plan's length/period and include functional Terms of Use
+      (EULA) + Privacy Policy links before purchase (Apple 3.1.2). Today it
+      shows only title + price.
 - [ ] Privacy policy + store data-safety / privacy-nutrition disclosures —
       **mandatory** on both stores because the app collects GPS *and
       background* location. Not started.
 - [ ] Apple App Review prep — background location is heavily scrutinized;
       write a clear justification tied to the value prop or risk rejection.
 - [ ] Permission-priming UX for location + notifications before the OS prompt.
-- [ ] Security pass before going public — auth, RevenueCat webhook
-      shared-secret model, PII location handling.
+- [ ] Final security pass before going public — work through "Security
+      hardening (pre-launch)" above; spot-check PII/location handling and the
+      RevenueCat shared-secret webhook once deployed.
 
 ---
 
 ## Decisions — reference
 
 ### Tomorrow.io call-volume estimate (resolves Phase 3 tier decision)
+
+> Note (tier cadence since decided): paid now polls every **5 min** (not 2)
+> and free polls **hourly**, so real per-cell volume is lower than the 2-min
+> figures below — paid ≈ 288 runs/day/cell, free ≈ 24. The shape of the
+> argument (the cross-cycle cache is the big lever) is unchanged.
 
 Free tier (per `ACCOUNTS.md`): **500 calls/day, 25/hr, 3/s.**
 
@@ -152,7 +231,7 @@ tier only once real concurrent users span many cells.
       (+ regression tests) so live data yields real lead times
 - [x] Reject unknown request fields (Ajv `removeAdditional:false`); load
       `.env` in vitest config so `npm test` needs no shell setup
-- [x] Server unit + integration tests — 56 passing against real Postgres
+- [x] Server unit + integration tests — 70 passing against real Postgres
 - [x] FCM token rotation — addPushTokenListener re-syncs token (Providers)
 - [x] Push handler + deep-link — foreground handler + tap routes to
       app/forecast.tsx (incl. cold-start)
@@ -171,4 +250,14 @@ tier only once real concurrent users span many cells.
       (project-level, so it also covers the rack deploy). Verified: real
       token from the emulator → live Reykjavik rain → cron match → push on
       device.
+- [x] Free/paid alert tiers (server, 2026-06-15) — two node-cron schedules:
+      free = hourly rain-only ("within the hour"), paid = 5-min + full prefs.
+      Mutually exclusive by subscription status; shared `alert_log` dedup.
+      Spec §6.3 / §8.4 updated; `.env.example` documents `ALERT_ENGINE_FREE_CRON`.
+- [x] Security fixes (2026-06-15) — social sign-in now requires a
+      provider-verified email (`email_verified` gate in apple/googleAuth),
+      closing an account-takeover vector; tokens are revocable via a
+      `tokenVersion` claim checked in `authenticate` + `/auth/refresh`, so
+      deleted / logged-out users' tokens stop working (migration
+      `..._user_token_version`).
 </content>

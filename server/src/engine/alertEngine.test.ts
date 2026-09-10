@@ -61,8 +61,8 @@ interface SeedUser {
   email: string;
   lat: number;
   lng: number;
-  /** Defaults to "active". */
-  status?: "active" | "trial" | "expired" | "cancelled";
+  /** Defaults to "active". Use "none" to create no subscription row at all. */
+  status?: "active" | "trial" | "expired" | "cancelled" | "none";
   fcmToken?: string | null;
   notificationsOn?: boolean;
   /** Minutes ago for `updated_at` on user_locations. */
@@ -78,12 +78,10 @@ async function seedUser(u: SeedUser) {
       preferences: {
         create: { notificationsOn: u.notificationsOn ?? true },
       },
-      subscription: {
-        create: {
-          status: u.status ?? "active",
-          plan: "monthly",
-        },
-      },
+      subscription:
+        u.status === "none"
+          ? undefined
+          : { create: { status: u.status ?? "active", plan: "monthly" } },
     },
   });
   await prisma.userLocation.create({
@@ -248,5 +246,87 @@ describe("runAlertCycle", () => {
     const logs = await prisma.alertLog.findMany();
     expect(logs).toHaveLength(1);
     expect(logs[0].userId).toBe(okUser.id);
+  });
+});
+
+describe("runAlertCycle (free tier)", () => {
+  /** A forecast where snow (not rain) starts `offsetMin` minutes from now. */
+  function snowForecast(offsetMin: number): TomorrowMinute[] {
+    return [
+      {
+        time: new Date(Date.now() + offsetMin * 60_000).toISOString(),
+        values: {
+          precipitationIntensity: 1.0,
+          precipitationType: 2, // snow
+          precipitationProbability: 90,
+          windSpeed: 1,
+        },
+      },
+    ];
+  }
+
+  it("alerts an unsubscribed user about rain within the hour, ignoring lead time", async () => {
+    // Rain is 45 min away — well beyond the default 10-min lead time a paid
+    // user would be gated on. The free tier alerts anyway (any rain in window).
+    const user = await seedUser({
+      email: "free@example.com",
+      lat: 40.71,
+      lng: -74.01,
+      status: "none",
+    });
+    mockFetch.mockResolvedValue(rainForecast(45));
+
+    await runAlertCycle("free");
+
+    expect(mockSend).toHaveBeenCalledTimes(1);
+    const arg = mockSend.mock.calls[0][0];
+    expect(arg.title.toLowerCase()).toContain("hour");
+    expect(arg.data).toMatchObject({ event_type: "rain" });
+    const logs = await prisma.alertLog.findMany();
+    expect(logs).toHaveLength(1);
+    expect(logs[0].userId).toBe(user.id);
+  });
+
+  it("is rain-only — snow does not alert on the free tier", async () => {
+    await seedUser({
+      email: "free-snow@example.com",
+      lat: 40.71,
+      lng: -74.01,
+      status: "none",
+    });
+    mockFetch.mockResolvedValue(snowForecast(20));
+
+    await runAlertCycle("free");
+
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  it("does not process active/trial users (those belong to the paid tier)", async () => {
+    await seedUser({
+      email: "active@example.com",
+      lat: 40.71,
+      lng: -74.01,
+      status: "active",
+    });
+    mockFetch.mockResolvedValue(rainForecast(45));
+
+    await runAlertCycle("free");
+
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  it("covers expired/cancelled subscribers (they fall back to free)", async () => {
+    await seedUser({
+      email: "expired@example.com",
+      lat: 40.71,
+      lng: -74.01,
+      status: "expired",
+    });
+    mockFetch.mockResolvedValue(rainForecast(50));
+
+    await runAlertCycle("free");
+
+    expect(mockSend).toHaveBeenCalledTimes(1);
   });
 });

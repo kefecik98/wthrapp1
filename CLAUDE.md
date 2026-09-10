@@ -26,6 +26,7 @@ Monorepo with two independent npm projects:
 - `TODO.md` — living tracker of open work, blocked items (env/credentials), and pending product decisions.
 - `ACCOUNTS.md` — external accounts/credentials map: which service each env var consumes, signup cost, and free-tier limits.
 - `.github/workflows/ci.yml` — CI runs server typecheck + tests (against a real Postgres service) and client typecheck + lint + jest on push/PR. CI also enforces Prisma migration drift via `prisma migrate diff --exit-code`, so any `schema.prisma` change requires a committed migration alongside it.
+- `server/trigger_cycle.ts` + `server/retry_push.sh` — ad-hoc scripts for manually firing an alert cycle / re-sending an FCM push during debugging; not part of the running app.
 
 There is no root `package.json`; run commands inside `server/` or `client/`.
 
