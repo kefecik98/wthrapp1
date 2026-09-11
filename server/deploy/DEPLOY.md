@@ -89,6 +89,12 @@ cp /opt/weatheralert/server/.env.example /opt/weatheralert/server/.env
 #   DATABASE_URL=postgresql://weather:<DB_PASSWORD>@10.0.0.20:5432/weather_app
 # Drop the Firebase service-account JSON next to the project and point
 # GOOGLE_APPLICATION_CREDENTIALS at its absolute path.
+#
+# Production must also set:
+#   NODE_ENV=production
+#   TRUST_PROXY=true      # Nginx sets X-Forwarded-For; without this every
+#                         # rate-limit bucket keys on the proxy's own IP.
+#   ENABLE_DEV_ROUTES     # leave unset/false — never true in production.
 ```
 
 ---

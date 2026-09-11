@@ -24,6 +24,16 @@ import {
   restore,
 } from '@/src/services/purchases';
 
+// What the two tiers actually do, kept in step with the server alert engine
+// (server/src/engine/alertEngine.ts) and the locked rows on the preferences
+// screen. If the engine's tiering changes, change this copy with it.
+const COMPARISON: { feature: string; free: string; premium: string }[] = [
+  { feature: 'Weather types', free: 'Rain only', premium: 'Rain, snow, hail, thunder, wind' },
+  { feature: 'How often we check', free: 'Every hour', premium: 'Every 5 minutes' },
+  { feature: 'Warning time', free: 'Within the hour', premium: 'Your own lead time, 1–60 min' },
+  { feature: 'Rain sensitivity', free: 'Any rain', premium: 'Light, moderate or heavy' },
+];
+
 export default function PaywallScreen() {
   const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
@@ -67,8 +77,35 @@ export default function PaywallScreen() {
     <ScrollView contentContainerStyle={styles.container}>
       <ThemedText type="title">WeatherAlert Premium</ThemedText>
       <ThemedText style={styles.lead}>
-        Real-time alerts before weather hits your exact location.
+        Free gives you an hourly heads-up about rain. Premium watches every
+        five minutes, covers every kind of weather, and warns you exactly as
+        far ahead as you want.
       </ThemedText>
+
+      <ThemedView style={styles.card}>
+        <ThemedView style={[styles.compareRow, styles.compareHead]}>
+          <ThemedText style={[styles.compareCell, styles.compareFeature]} />
+          <ThemedText style={[styles.compareCell, styles.compareHeadText]}>
+            Free
+          </ThemedText>
+          <ThemedText style={[styles.compareCell, styles.compareHeadText]}>
+            Premium
+          </ThemedText>
+        </ThemedView>
+        {COMPARISON.map((row) => (
+          <ThemedView key={row.feature} style={styles.compareRow}>
+            <ThemedText style={[styles.compareCell, styles.compareFeature]}>
+              {row.feature}
+            </ThemedText>
+            <ThemedText style={[styles.compareCell, styles.muted]}>
+              {row.free}
+            </ThemedText>
+            <ThemedText style={[styles.compareCell, styles.comparePremium]}>
+              {row.premium}
+            </ThemedText>
+          </ThemedView>
+        ))}
+      </ThemedView>
 
       {!revenueCatConfigured && (
         <ThemedView style={styles.card}>
@@ -116,6 +153,13 @@ export default function PaywallScreen() {
 const styles = StyleSheet.create({
   container: { padding: 20, paddingTop: 64, gap: 14 },
   lead: { opacity: 0.8, marginBottom: 8 },
+  muted: { opacity: 0.6 },
+  compareRow: { flexDirection: 'row', gap: 8, paddingVertical: 6 },
+  compareHead: { borderBottomWidth: 1, borderBottomColor: '#0a7ea433' },
+  compareHeadText: { fontWeight: '600' },
+  compareCell: { flex: 1, fontSize: 13 },
+  compareFeature: { flex: 0.9, fontWeight: '600' },
+  comparePremium: { color: '#0a7ea4' },
   card: { borderRadius: 12, padding: 16 },
   plan: {
     borderWidth: 1,

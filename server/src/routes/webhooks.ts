@@ -31,6 +31,29 @@ function secretMatches(provided: string, expected: string): boolean {
   return timingSafeEqual(a, b);
 }
 
+// Body schema. This is the only route whose payload comes from a third
+// party, so validate the fields we act on at the boundary instead of letting
+// them reach Prisma untyped. `additionalProperties` stays open deliberately:
+// RevenueCat sends far more fields than we consume and adds new ones over
+// time, so rejecting unknown fields would break the hook on their next
+// release. We pin the shape of what we *read*, not the whole envelope.
+const webhookBodySchema = {
+  type: "object",
+  required: ["event"],
+  properties: {
+    event: {
+      type: "object",
+      required: ["type", "app_user_id"],
+      properties: {
+        type: { type: "string", minLength: 1 },
+        app_user_id: { type: "string", minLength: 1 },
+        product_id: { type: "string" },
+        expiration_at_ms: { type: "integer", minimum: 0 },
+      },
+    },
+  },
+} as const;
+
 // Map a RevenueCat event type to our subscription status.
 function statusForEvent(type: string): string | null {
   switch (type) {
@@ -55,16 +78,20 @@ export default async function webhookRoutes(
 ): Promise<void> {
   app.post<{ Body: RevenueCatWebhook }>(
     "/webhooks/revenuecat",
+    {
+      schema: { body: webhookBodySchema },
+      // Check the shared secret in onRequest, i.e. before schema validation,
+      // so an unauthenticated caller gets a flat 401 and learns nothing about
+      // the payload shape from validation errors.
+      onRequest: async (request, reply) => {
+        const auth = request.headers.authorization ?? "";
+        if (!secretMatches(auth, config.revenueCat.webhookSecret)) {
+          return reply.code(401).send({ error: "Invalid webhook signature" });
+        }
+      },
+    },
     async (request, reply) => {
-      const auth = request.headers.authorization ?? "";
-      if (!secretMatches(auth, config.revenueCat.webhookSecret)) {
-        return reply.code(401).send({ error: "Invalid webhook signature" });
-      }
-
-      const event = request.body?.event;
-      if (!event?.type || !event.app_user_id) {
-        return reply.code(400).send({ error: "Malformed webhook payload" });
-      }
+      const event = request.body.event;
 
       const status = statusForEvent(event.type);
       if (!status) {

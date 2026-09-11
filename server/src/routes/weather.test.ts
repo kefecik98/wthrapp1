@@ -25,6 +25,7 @@ vi.mock("../services/weather", async () => {
 import { prisma } from "../db";
 import { bearer, buildTestApp, resetDb } from "../test/helpers";
 import { fetchMinutely } from "../services/weather";
+import { clearForecastCache } from "../services/forecastCache";
 
 const mockFetch = vi.mocked(fetchMinutely);
 
@@ -41,6 +42,9 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await resetDb();
+  // /weather reads through the shared grid-cell cache, which is module-level
+  // and outlives a request by design — start each test from an empty one.
+  clearForecastCache();
   mockFetch.mockReset();
 });
 

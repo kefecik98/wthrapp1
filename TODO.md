@@ -9,14 +9,20 @@ credential · `(DECISION)` needs a product decision from K.
 
 ## Actionable now (code, no blockers)
 
-- [ ] Cache forecasts *across* alert cycles (TTL ~5–10 min), not just within
-      one cycle. Today `forecastCache` is rebuilt every run, so call volume =
-      runs/day × occupied cells (≈720 × cells). A cross-cycle TTL decouples
-      cost from cron cadence and is the single biggest lever on Tomorrow.io
-      spend — see the call-volume note under "Decisions" below.
-- [ ] Make the alert-engine cron cadence explicitly trade lead-time precision
-      against call volume once the cache above lands (config already exposes
-      `ALERT_ENGINE_CRON`).
+- [x] **Cross-cycle forecast cache** — `src/services/forecastCache.ts`.
+      Grid-keyed (~0.1°), TTL'd (`FORECAST_CACHE_TTL_MS`, default 10 min),
+      with in-flight dedup so the overlapping free/paid cycles share one
+      upstream call, no caching of failures, and expiry-pruning plus a size
+      ceiling (`FORECAST_CACHE_MAX_ENTRIES`). Both the alert engine and
+      `GET /weather` read through it — `fetchMinutely` is no longer called
+      directly anywhere. Call volume is now ~144/day/cell regardless of cron
+      cadence or users-per-cell, down from ~288 (paid) + 24 (free) + every
+      in-app forecast view. 8 unit tests in `forecastCache.test.ts`.
+- [x] Alert-engine cron cadence trade-off — resolved by the cache rather than
+      by retuning: with spend set by the cache TTL, cadence now buys only
+      lead-time precision (how soon an event is noticed), at no extra call
+      cost. Documented at `ALERT_ENGINE_CRON` in `.env.example`; the 5-min
+      paid / hourly free cadences stand.
 - [ ] **Account deletion** (store rejection blocker — Apple 5.1.1(v) + Google
       Play Data Deletion; required for any app that supports account creation).
       - [x] Server `DELETE /account` endpoint — deleting the `users` row
@@ -34,12 +40,15 @@ credential · `(DECISION)` needs a product decision from K.
             `src/__tests__/screens/home-delete-account.test.tsx`.
       - [ ] Publicly reachable web page for deletion requests (store-form
             wiring waits for launch — see Phase 5).
-- [ ] **Free/paid tier — client gating.** Server engine now tiers alerts
-      (free = hourly rain-within-the-hour, paid = 5-min + full prefs), but the
-      client still shows every preference to everyone. Gate the preferences
-      screen by `useSubscription().isActive`: free users see a rain-only view
-      with a locked upsell on event types / lead time; paid users get the full
-      set. Update paywall copy to sell the difference.
+- [x] **Free/paid tier — client gating.** `app/(tabs)/preferences.tsx` now
+      branches on `useSubscription().isActive`. Free users get a "You're on
+      the free plan" banner, Rain shown as *Included*, and locked 🔒 Premium
+      rows for snow/hail/thunder/wind, lead time and rain intensity — each
+      routing to `/paywall` instead of writing a preference the engine
+      ignores. The master notifications switch stays live on both tiers
+      (the engine honours it either way). Paywall gained a free-vs-Premium
+      comparison table and the home screen no longer claims alerts "require a
+      subscription". 9 tests in `preferences-gating.test.tsx`.
 - [ ] **Custom alert sound/vibration (paid).** New per-user sound/vibration
       settings: needs server prefs fields + client UI. Android gotcha — a
       notification channel's sound/importance is locked after creation, so
@@ -95,11 +104,12 @@ movement, and the entire iOS/APNs path (untested).
       only, hourly poll, "rain expected within the hour"; paid = all event
       types, 5-min poll, customizable lead time (+ planned sound/vibration).
       Server alert-engine tiering implemented (`ALERT_ENGINE_CRON` now 5-min,
-      new `ALERT_ENGINE_FREE_CRON` hourly). Client gating still open — see the
-      free/paid client items under "Actionable now".
-- [ ] (DECISION) Tomorrow.io plan/tier — see the call-volume note below. Free
-      tier is validation-only as the code stands today; the cross-cycle cache
-      (see "Actionable now") changes the answer.
+      new `ALERT_ENGINE_FREE_CRON` hourly). Client gating now implemented too
+      (locked rows + upsell on the preferences screen).
+- [ ] (DECISION) Tomorrow.io plan/tier — still open, but the cross-cycle cache
+      has landed and changed the math: the free tier now supports ~3
+      continuously-active cells instead of being validation-only. See the
+      updated call-volume note below; decide against real beta usage.
 
 ## Phase 4 — Production hardening + deploy (rack, spec §7)
 
@@ -139,28 +149,34 @@ From the 2026-06-15 security review. The two account-takeover / session
 findings are fixed (see Done); these are the rest, by severity. All are code,
 no external blockers.
 
-- [ ] (MEDIUM) Dev routes fail *open* in prod. `app.ts` registers dev routes
-      when `NODE_ENV !== "production"`, and `NODE_ENV` defaults to development,
-      so a missing/typo'd value exposes `POST /dev/seed-subscription` (any
-      authed user could grant themselves a subscription). Fail closed: require
-      `NODE_ENV` explicitly, or gate on a positive `ENABLE_DEV_ROUTES=true`.
-- [ ] (MEDIUM) No rate limiting. Add `@fastify/rate-limit` with a tight bucket
-      on `/auth/*` (brute-force / credential-stuffing / email enumeration) plus
-      a global default; set `trustProxy` so limits key on the real client IP
-      behind Nginx.
-- [ ] (LOW) Pin the JWT algorithm — `jwt.verify(..., { algorithms: ["HS256"] })`
-      in `lib/tokens.ts` (defensive; the social verifiers already pin RS256).
-- [ ] (LOW) Cap password length — add `maxLength: 128` to the auth schema
-      (bcrypt only uses the first 72 bytes; bound it so behaviour is explicit).
-- [ ] (LOW) Add `@fastify/helmet` (security headers); set HSTS at Nginx. Add
-      `@fastify/cors` with an allowlist only if the Expo `web` target is real.
-- [ ] (LOW) Give the RevenueCat webhook a JSON body schema (it's the only route
-      without one) so `app_user_id` / `expiration_at_ms` are validated at the
-      boundary instead of reaching Prisma untyped.
-- [ ] (LOW) `data: request.body` writes (e.g. `preferences.ts`) are safe only
-      because every write schema is `additionalProperties:false`. Document that
-      rule in `server/CLAUDE.md`, or switch to an explicit allowlist, so a
-      future sensitive column can't become mass-assignable.
+- [x] (MEDIUM) Dev routes now fail *closed* — they register on a positive
+      `ENABLE_DEV_ROUTES=true`, not on `NODE_ENV !== "production"`, so a
+      missing or misspelled `NODE_ENV` can't expose
+      `POST /dev/seed-subscription`. Setting it while `NODE_ENV=production`
+      logs a warning. Pinned to `false` in `vitest.config.ts` so the guard
+      test can't be masked by a developer's local `.env`.
+- [x] (MEDIUM) Rate limiting — `@fastify/rate-limit` with a global default
+      (`RATE_LIMIT_MAX`, 120/min) and a tight bucket on every `/auth/*` route
+      including Apple/Google (`RATE_LIMIT_AUTH_MAX`, 10/min) via
+      `app.authRateLimit`. `/health` is exempt so uptime checks aren't
+      throttled. `TRUST_PROXY=true` (set it in production) makes buckets key
+      on the real client IP behind Nginx rather than the proxy's.
+- [x] (LOW) JWT algorithm pinned to HS256 on both sign and verify in
+      `lib/tokens.ts`; an `alg: none` token is rejected (test).
+- [x] (LOW) Password capped at `maxLength: 128` in the auth schema.
+- [x] (LOW) `@fastify/helmet` registered with `hsts: false` (Nginx terminates
+      TLS and owns HSTS).
+- [ ] (LOW) `@fastify/cors` with an allowlist — still open, and deliberately:
+      it is only needed if the Expo `web` target becomes a real shipping
+      surface. Decide that first.
+- [x] (LOW) RevenueCat webhook now has a JSON body schema validating `event`,
+      `type`, `app_user_id`, `product_id` and `expiration_at_ms`.
+      `additionalProperties` stays open on purpose (RevenueCat adds fields
+      over time); the shared-secret check moved to `onRequest` so it runs
+      *before* validation and an unauthenticated caller learns nothing about
+      the payload shape.
+- [x] (LOW) The `data: request.body` mass-assignment rule is now documented in
+      `server/CLAUDE.md` and `server/CONTEXT.md`.
 
 ## Phase 5 — Store launch
 
@@ -196,10 +212,17 @@ itself moved to "Actionable now" since it's code with no external blocker.)
 
 ### Tomorrow.io call-volume estimate (resolves Phase 3 tier decision)
 
-> Note (tier cadence since decided): paid now polls every **5 min** (not 2)
-> and free polls **hourly**, so real per-cell volume is lower than the 2-min
-> figures below — paid ≈ 288 runs/day/cell, free ≈ 24. The shape of the
-> argument (the cross-cycle cache is the big lever) is unchanged.
+> **Update — the cross-cycle cache has landed, so the figures below are
+> historical.** Actual volume is now `1440 / TTL_minutes` per occupied cell,
+> independent of cron cadence and users-per-cell: **~144 calls/day/cell** at
+> the default 10-minute TTL, and in-app `GET /weather` views are served from
+> the same cache. That keeps roughly **3 continuously-active cells** inside
+> the 500/day free tier (and comfortably inside 25/hr, which now costs ~6
+> calls/hr/cell). Raising `FORECAST_CACHE_TTL_MS` trades lookahead for
+> headroom: a 15-min TTL is ~96/day/cell.
+>
+> (Prior note, for context: paid polls every 5 min and free hourly, so
+> pre-cache volume was ~288 + ~24 runs/day/cell.)
 
 Free tier (per `ACCOUNTS.md`): **500 calls/day, 25/hr, 3/s.**
 
@@ -226,9 +249,10 @@ Rough production sizing (24/7, current code, no cache):
 
 Plus on-demand `GET /weather` ≈ 1 call per in-app forecast view.
 
-**Recommendation:** land the cross-cycle cache first; it makes the free tier
-viable for beta and cuts the eventual paid bill. Move to a paid Tomorrow.io
-tier only once real concurrent users span many cells.
+**Recommendation (updated):** the cache is in, so the free tier is viable for
+a small beta — about 3 continuously-active cells, more if you raise the TTL.
+Move to a paid Tomorrow.io tier only once real concurrent users span more
+cells than that. Re-measure against real usage before committing to a plan.
 
 ---
 

@@ -156,16 +156,18 @@ export default function HomeScreen() {
 
       <ThemedView style={styles.card}>
         <ThemedText type="subtitle">Subscription</ThemedText>
+        {/* Free is a real tier, not a dead end — say what it gives them.
+            Must stay in step with the server's alert-engine tiering. */}
         <ThemedText style={styles.muted}>
           {subscription.data?.isActive
-            ? 'Premium active — alerts enabled.'
-            : 'Not subscribed. Alerts require a subscription.'}
+            ? 'Premium active — all weather types, checked every 5 minutes.'
+            : 'Free plan — hourly rain alerts. Premium adds snow, hail, thunder and wind, checked every 5 minutes.'}
         </ThemedText>
         <Pressable style={styles.btn} onPress={() => router.push('/paywall')}>
           <ThemedText style={styles.btnText}>
             {subscription.data?.isActive
               ? 'Manage subscription'
-              : 'Subscribe'}
+              : 'Upgrade to Premium'}
           </ThemedText>
         </Pressable>
       </ThemedView>

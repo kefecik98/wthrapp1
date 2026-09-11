@@ -92,7 +92,8 @@ The client and server cooperate to deliver one thing: a push notification fired 
 - All config flows through `src/config.ts`; do not read `process.env` elsewhere. The one exception is `src/services/push.ts` reading `GOOGLE_APPLICATION_CREDENTIALS` — that var is consumed by the Firebase Admin SDK itself, not our config.
 - Validate at the boundary with Fastify JSON schemas on request bodies.
 - No native build steps in dependencies: `bcryptjs` (not `bcrypt`), built-in `fetch` (no axios).
-- Dev-only routes in `src/routes/dev.ts` are registered only when `NODE_ENV !== 'production'`.
+- Dev-only routes in `src/routes/dev.ts` are registered only when `ENABLE_DEV_ROUTES=true` (a positive opt-in, so a missing/typo'd `NODE_ENV` can't expose them).
+- Every Tomorrow.io read goes through `src/services/forecastCache.ts` (`getMinutely`), never `fetchMinutely` directly — the grid-cell cache is shared by the alert engine and `GET /weather`, and its TTL is what bounds API spend.
 - Tests are vitest; the build uses `tsconfig.build.json` to exclude test files.
 
 ## Client-specific conventions

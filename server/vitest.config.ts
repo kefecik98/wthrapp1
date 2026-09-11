@@ -19,6 +19,10 @@ try {
 export default defineConfig({
   test: {
     env: {
+      // Pinned, not inherited: a developer with ENABLE_DEV_ROUTES=true in
+      // their local .env must still see the production-shaped app under test,
+      // or security.test.ts's "dev routes are off" assertion is meaningless.
+      ENABLE_DEV_ROUTES: "false",
       JWT_ACCESS_SECRET:
         process.env.JWT_ACCESS_SECRET ?? fileEnv.JWT_ACCESS_SECRET ?? "test-access",
       JWT_REFRESH_SECRET:

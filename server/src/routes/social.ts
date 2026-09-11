@@ -94,13 +94,13 @@ export default async function socialRoutes(
 
   app.post<{ Body: { idToken: string } }>(
     "/auth/apple",
-    { schema: { body: bodySchema } },
+    { schema: { body: bodySchema }, config: { rateLimit: app.authRateLimit } },
     handle("apple", verifyAppleToken),
   );
 
   app.post<{ Body: { idToken: string } }>(
     "/auth/google",
-    { schema: { body: bodySchema } },
+    { schema: { body: bodySchema }, config: { rateLimit: app.authRateLimit } },
     handle("google", verifyGoogleToken),
   );
 }

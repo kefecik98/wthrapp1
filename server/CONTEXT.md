@@ -89,7 +89,8 @@ above provides one so `migrate deploy` works.
 - Validate at the boundary: Fastify JSON schemas on request bodies.
 - All config flows through `config.ts`; do not read `process.env` elsewhere.
 - Dev-only routes (`src/routes/dev.ts`) are registered only when
-  `NODE_ENV !== 'production'`; never rely on them in production code paths.
+  `ENABLE_DEV_ROUTES=true` — a positive opt-in, so a missing or misspelled
+  `NODE_ENV` can't expose them; never rely on them in production code paths.
 - RevenueCat webhook auth is a static Authorization-header secret (their
   documented model — no HMAC); `REVENUECAT_WEBHOOK_SECRET` must equal the
   exact header value set in the RevenueCat dashboard.

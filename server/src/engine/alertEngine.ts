@@ -9,20 +9,22 @@
 //          same ~60-minute forecast, so an hourly poll has no coverage gap.
 //
 // Users are clustered into ~0.1° grid cells so we make at most one Tomorrow.io
-// call per cell per run, instead of one call per user.
+// call per cell, instead of one call per user. That cache lives in
+// services/forecastCache and persists *across* cycles (and is shared with
+// GET /weather), so call volume tracks the cache TTL rather than the cron
+// cadence — see the note at the top of that file.
 
 import cron, { ScheduledTask } from "node-cron";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../db";
 import { config } from "../config";
 import {
-  fetchMinutely,
   findNextEvent,
   PreferenceThresholds,
-  TomorrowMinute,
   WeatherEvent,
   WeatherEventType,
 } from "../services/weather";
+import { getMinutely, gridKey } from "../services/forecastCache";
 import { sendPush } from "../services/push";
 
 export type AlertTier = "paid" | "free";
@@ -59,12 +61,6 @@ const TIER_FILTER: Record<AlertTier, Prisma.UserWhereInput> = {
     ],
   },
 };
-
-/** Grid key: ~0.1° (~11 km) cell. Keeps nearby users on one API call. */
-function gridKey(lat: number, lng: number): string {
-  const cell = (n: number) => Math.floor(n * 10) / 10;
-  return `${cell(lat)}_${cell(lng)}`;
-}
 
 /** Build the push payload for a matched event, per tier. */
 function buildPush(tier: AlertTier, token: string, event: WeatherEvent) {
@@ -115,24 +111,18 @@ export async function runAlertCycle(tier: AlertTier = "paid"): Promise<void> {
 
   if (users.length === 0) return;
 
-  // Cache one forecast per grid cell for the duration of this cycle.
-  const forecastCache = new Map<string, TomorrowMinute[]>();
-
   for (const user of users) {
     const loc = user.location;
     const prefs = user.preferences;
     if (!loc || !prefs || !user.fcmToken) continue;
 
-    const key = gridKey(loc.lat, loc.lng);
-    let minutes = forecastCache.get(key);
-    if (!minutes) {
-      try {
-        minutes = await fetchMinutely(loc.lat, loc.lng);
-        forecastCache.set(key, minutes);
-      } catch (err) {
-        console.error(`[alert-engine] forecast failed for ${key}:`, err);
-        continue;
-      }
+    let minutes;
+    try {
+      minutes = await getMinutely(loc.lat, loc.lng);
+    } catch (err) {
+      const key = gridKey(loc.lat, loc.lng);
+      console.error(`[alert-engine] forecast failed for ${key}:`, err);
+      continue;
     }
 
     // Paid honours the user's enabled events; free is rain-only. Paid also

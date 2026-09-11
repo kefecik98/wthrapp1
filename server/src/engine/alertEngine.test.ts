@@ -35,6 +35,7 @@ vi.mock("../services/push", () => ({
 import { prisma } from "../db";
 import { runAlertCycle } from "./alertEngine";
 import { fetchMinutely, TomorrowMinute } from "../services/weather";
+import { clearForecastCache } from "../services/forecastCache";
 import { sendPush } from "../services/push";
 import { resetDb } from "../test/helpers";
 
@@ -52,6 +53,9 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await resetDb();
+  // The forecast cache is module-level and outlives a single cycle by design,
+  // so each test starts from an empty one.
+  clearForecastCache();
   mockFetch.mockReset();
   mockSend.mockReset();
   mockSend.mockResolvedValue(true);
