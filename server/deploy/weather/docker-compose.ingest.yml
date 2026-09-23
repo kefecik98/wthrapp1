@@ -1,0 +1,84 @@
+# WeatherAlert's fix for Pirate Weather's local ingest compose.
+#
+# Upstream mounts the work area at /tmp and the output at /data as two
+# separate bind mounts. Five ingest scripts (GFS, NBM, GEFS, HRRR, ECMWF)
+# finish with os.rename() from one to the other, which Linux refuses across
+# mount points: "OSError: [Errno 18] Invalid cross-device link" — the GFS
+# job died on it during our first run, blocking every other job.
+#
+# Every path those scripts use comes from environment variables, so instead
+# of patching their (AGPL) code we mount the whole volume once, at /pw, and
+# point each job's paths into it. rename() then stays inside one mount. The
+# layout on the host is unchanged: Work/Process/<MODEL> and
+# Weather/{Prod,Hist}/<MODEL>. Upstream's own /tmp and /data mounts remain
+# (compose merges volume lists) but nothing writes to them any more.
+#
+# Loaded via COMPOSE_FILE in /opt/pirate-weather/.env (see README step 4),
+# so every plain `docker compose` command includes it.
+
+x-pw-volume: &pw_volume
+  - ${PW_ROOT:?set PW_ROOT in .env, e.g. /srv/pirate-weather}:/pw
+
+services:
+  gfs_ingest:
+    volumes: *pw_volume
+    environment:
+      forecast_process_dir: "/pw/Work/Process/GFS"
+      forecast_path: "/pw/Weather/Prod/GFS"
+      historic_path: "/pw/Weather/Hist/GFS"
+
+  nbm_ingest:
+    volumes: *pw_volume
+    environment:
+      forecast_process_dir: "/pw/Work/Process/NBM"
+      forecast_path: "/pw/Weather/Prod/NBM"
+      historic_path: "/pw/Weather/Hist/NBM"
+
+  subh_ingest:
+    volumes: *pw_volume
+    environment:
+      forecast_process_dir: "/pw/Work/Process/SubH"
+      forecast_path: "/pw/Weather/Prod/SubH"
+      historic_path: "/pw/Weather/Hist/SubH"
+
+  gefs_ingest:
+    volumes: *pw_volume
+    environment:
+      forecast_process_dir: "/pw/Work/Process/GEFS"
+      forecast_path: "/pw/Weather/Prod/GEFS"
+      historic_path: "/pw/Weather/Hist/GEFS"
+
+  hrrr_ingest:
+    volumes: *pw_volume
+    environment:
+      forecast_process_dir: "/pw/Work/Process/HRRR"
+      forecast_path: "/pw/Weather/Prod/HRRR"
+      historic_path: "/pw/Weather/Hist/HRRR"
+
+  hrrr_6h_ingest:
+    volumes: *pw_volume
+    environment:
+      forecast_process_dir: "/pw/Work/Process/HRRR_6H"
+      forecast_path: "/pw/Weather/Prod/HRRR_6H"
+      historic_path: "/pw/Weather/Hist/HRRR_6H"
+
+  nws_alerts_ingest:
+    volumes: *pw_volume
+    environment:
+      forecast_process_dir: "/pw/Work/Process/NWS_Alerts"
+      forecast_path: "/pw/Weather/Prod/NWS_Alerts"
+      historic_path: "/pw/Weather/Hist/NWS_Alerts"
+
+  ecmwf_ingest:
+    volumes: *pw_volume
+    environment:
+      forecast_process_dir: "/pw/Work/Process/ECMWF"
+      forecast_path: "/pw/Weather/Prod/ECMWF"
+      historic_path: "/pw/Weather/Hist/ECMWF"
+
+  rtma-ru-ingest:
+    volumes: *pw_volume
+    environment:
+      forecast_process_dir: "/pw/Work/Process/RTMA-RU"
+      forecast_path: "/pw/Weather/Prod/RTMA-RU"
+      historic_path: "/pw/Weather/Hist/RTMA-RU"

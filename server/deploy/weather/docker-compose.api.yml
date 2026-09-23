@@ -4,14 +4,19 @@
 # its api_server is commented out and points at their AWS paths. This file
 # is layered on top of it:
 #
+# It is in the `api` profile, so a plain `docker compose up -d` starts only
+# the ingest jobs; the API starts once data exists and link-stores.sh has run:
+#
 #   cd /opt/pirate-weather
-#   docker compose -f pirate-compose_oph.local.yml \
-#                  -f /opt/weatheralert-weather/docker-compose.api.yml up -d
+#   docker compose --profile api up -d pw_api
+#
+# (COMPOSE_FILE in /opt/pirate-weather/.env lists all three compose files.)
 #
 # See README.md in this directory for the full runbook.
 
 services:
   pw_api:
+    profiles: ["api"]
     # Built from Pirate Weather's own Dockerfile at the pinned release (see
     # README step 3), so it runs on x64 and matches the ingest code exactly.
     image: pirateapi:${PW_RELEASE:?set PW_RELEASE in .env, e.g. v0.7.2}

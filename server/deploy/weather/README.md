@@ -133,12 +133,26 @@ cp /tmp/wa/server/deploy/weather/* /opt/weatheralert-weather/ && rm -rf /tmp/wa
 
 ```bash
 cat > /opt/pirate-weather/.env <<EOF
+PW_ROOT=/srv/pirate-weather
 PW_WEATHER_ROOT=/srv/pirate-weather/Weather
 PW_WORK_ROOT=/srv/pirate-weather/Work
 PW_RELEASE=v0.7.2
 PW_API_BIND=<WEATHER_IP>
+COMPOSE_FILE=pirate-compose_oph.local.yml:/opt/weatheralert-weather/docker-compose.ingest.yml:/opt/weatheralert-weather/docker-compose.api.yml
 EOF
 ```
+
+`COMPOSE_FILE` makes every plain `docker compose …` in `/opt/pirate-weather`
+load all three files, so the ingest jobs can't be started without our fix:
+
+- `docker-compose.ingest.yml` — **required.** Upstream mounts the work area
+  (`/tmp`) and output (`/data`) separately, and five ingest scripts finish
+  with `os.rename()` across them, which Linux refuses (`[Errno 18] Invalid
+  cross-device link` — our first GFS run died on it). This mounts the volume
+  once at `/pw` and repoints each job's path variables into it. No upstream
+  code is changed.
+- `docker-compose.api.yml` — the API server, in the `api` profile so it only
+  starts when asked (step 5).
 
 ## 5. First ingest, then the API
 
@@ -147,12 +161,15 @@ an hour**. Start ingest only, and watch it:
 
 ```bash
 cd /opt/pirate-weather
-docker compose -f pirate-compose_oph.local.yml up -d
-docker compose -f pirate-compose_oph.local.yml logs -f
+tmux new -s pw          # `up` blocks until every job has run once
+docker compose up -d
+docker compose logs -f  # in a second tmux window
 ```
 
-Ofelia (the scheduler) only starts once every ingest job has finished once.
-When `docker compose ps` shows it running, check the output:
+Upstream chains the jobs with `depends_on: service_completed_successfully`,
+so `up` waits for all nine and one failure stops the rest. Ofelia (the
+scheduler) only starts once every ingest job has finished once. When
+`docker compose ps` shows it running, check the output:
 
 ```bash
 find /srv/pirate-weather/Weather/Prod -maxdepth 3 -name '*.zarr' | sort
@@ -167,8 +184,7 @@ Link them to the names the API expects, then start the API:
 ```bash
 PW_DIR=/opt/pirate-weather /opt/weatheralert-weather/link-stores.sh
 
-docker compose -f pirate-compose_oph.local.yml \
-               -f /opt/weatheralert-weather/docker-compose.api.yml up -d pw_api
+docker compose --profile api up -d pw_api
 docker logs -f pirate-api    # "Loaded GFS_Zarr from: /data/api/GFS.zarr" etc.
 ```
 
