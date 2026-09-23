@@ -27,7 +27,7 @@ waits on Apple enrolment.
       lead-time precision (how soon an event is noticed), at no extra call
       cost. Documented at `ALERT_ENGINE_CRON` in `.env.example`; the 5-min
       paid / hourly free cadences stand.
-- [ ] **Account deletion** (store rejection blocker — Google Play Data
+- [x] **Account deletion** (store rejection blocker — Google Play Data
       Deletion policy; required for any app that supports account creation).
       - [x] Server `DELETE /account` endpoint — deleting the `users` row
             cascades to location, preferences, alert_log, and subscriptions
@@ -42,9 +42,10 @@ waits on Apple enrolment.
             session on success. Hook in `src/hooks/useAuth.ts`; UI +
             confirmation in `app/(tabs)/index.tsx`; tests in
             `src/__tests__/screens/home-delete-account.test.tsx`.
-      - [ ] Publicly reachable web page for deletion requests. Play requires
-            a URL that works *without* installing the app. Needs the domain
-            (Phase 2) — can be a static page served by Caddy.
+      - [x] Public web page for deletion requests —
+            `server/deploy/caddy/legal/delete-account.html`, served by Caddy
+            at `https://<domain>/legal/delete-account` (works without the
+            app, as Play requires). Goes live with the first deploy.
 - [x] **Free/paid tier — client gating.** `app/(tabs)/preferences.tsx` now
       branches on `useSubscription().isActive`. Free users get a "You're on
       the free plan" banner, Rain shown as *Included*, and locked 🔒 Premium
@@ -54,28 +55,36 @@ waits on Apple enrolment.
       (the engine honours it either way). Paywall gained a free-vs-Premium
       comparison table and the home screen no longer claims alerts "require a
       subscription". 9 tests in `preferences-gating.test.tsx`.
-- [ ] **Paywall subscription disclosures.** `app/paywall.tsx` has Restore ✓
-      but shows only title + price. Play's subscriptions policy requires the
-      billing period, price per period, and how to cancel to be clear before
-      purchase; add Terms of Use + Privacy Policy links too (the policy URL
-      comes from Phase 5).
-- [ ] **Background-location prominent disclosure (Play rejection
-      blocker).** Play requires an in-app disclosure screen *before* the OS
-      background-location prompt: what is collected, that it is collected in
-      the background, and why. Build it as the permission-priming screen for
-      location; do the same (lighter) for notifications.
+- [x] **Paywall subscription disclosures.** Each plan now shows price per
+      period and any free trial / intro price (`src/lib/subscriptionTerms.ts`,
+      from RevenueCat's ISO 8601 period + intro price), plus renewal and
+      cancellation terms, a "Manage or cancel" link to the store for active
+      subscribers, and Terms of Use + Privacy Policy links
+      (`config.legal.*`, defaulting to `<API_URL>/legal/...`). Tests in
+      `subscriptionTerms.test.ts` + `paywall.test.tsx`.
+- [x] **Background-location prominent disclosure (Play rejection
+      blocker).** `components/location-disclosure.tsx` — a modal that says
+      what's collected, that it's collected while the app is closed, why, and
+      who it's shared with, and only leads to the OS prompt on an explicit
+      Continue. Skipped when background permission is already granted. The
+      home screen's Setup card also gained one-line rationales for location
+      and notifications. Tests in `home-location-disclosure.test.tsx` pin
+      the ordering (no OS prompt without Continue).
 - [ ] **Real app icon + splash.** `client/assets/images/icon.png` and the
       Android adaptive-icon/splash images are still the Expo template ("A" on
       a construction grid). Needs artwork, then swap the files `app.json`
       references.
-- [ ] **Stale "Nginx" references in server code.** `src/config.ts:34`,
-      `src/app.ts:51,62` and `src/routes/security.test.ts:54` still say Nginx
-      terminates TLS; it is Caddy now. Comment-only fix.
-- [ ] **HSTS is currently set nowhere.** Helmet runs with `hsts: false`
-      because Nginx was meant to own it, and the Caddyfile doesn't add it.
-      Low impact for a native-only API (Android's HTTP stack ignores HSTS),
-      but add `header Strict-Transport-Security "max-age=31536000"` to the
-      `{$API_DOMAIN}` block so the deletion/privacy web pages get it.
+- [x] Stale "Nginx" comments in server code now say Caddy.
+- [x] HSTS — the Caddyfile sets `Strict-Transport-Security` on the API
+      domain (helmet keeps `hsts: false`; the TLS terminator owns it).
+- [ ] **Send the grid-cell centre, not the user's exact point, to the
+      weather provider.** `forecastCache.getMinutely` passes the first
+      requester's precise lat/lng to `fetchMinutely`, then serves that
+      forecast to everyone in the ~11 km cell. Querying the cell centre gives
+      every user in the cell the same, better-centred forecast and means the
+      provider never sees a real user's coordinates — which would let the
+      privacy policy say so. Small change; moot if weather moves in-house
+      (see the Pirate Weather evaluation).
 - [ ] **Custom alert sound/vibration (paid).** New per-user sound/vibration
       settings: needs server prefs fields + client UI. Android gotcha — a
       notification channel's sound/importance is locked after creation, so
@@ -179,7 +188,8 @@ CI builds the image; the rack only pulls.
       strong `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET`, DB password, the
       same frp secret as the VPS, `API_DOMAIN`, `ACME_EMAIL`, real
       `REVENUECAT_WEBHOOK_SECRET` matching the dashboard, `TOMORROW_API_KEY`,
-      `GOOGLE_CLIENT_IDS`. `NODE_ENV=production`, `TRUST_PROXY=true`, and
+      `GOOGLE_CLIENT_IDS`, `OPERATOR_NAME` + `SUPPORT_EMAIL` (shown on
+      the `/legal` pages). `NODE_ENV=production`, `TRUST_PROXY=true`, and
       **`ENABLE_DEV_ROUTES` unset**. `DATABASE_URL` and
       `GOOGLE_APPLICATION_CREDENTIALS` are derived by Compose — don't set
       them. Copy `firebase-service-account.json` into
@@ -250,22 +260,27 @@ review, so treat them as gating, not polish.
 
 **Release build**
 
-- [ ] **Release build pipeline.** Only debug APKs exist today. Either add
-      `eas.json` (production profile → AAB) and build on EAS, or build
-      locally with `./gradlew bundleRelease`. Either way: generate an
-      **upload keystore**, back it up somewhere that isn't this laptop, and
-      enrol in **Play App Signing** (Google holds the app-signing key).
-- [ ] Bump `version` / `android.versionCode` per upload — Play rejects a
-      reused `versionCode`.
-- [ ] Release build must use the production HTTPS API URL (release builds
-      block cleartext HTTP, so a leftover LAN URL fails silently).
+- [x] **Release build config.** `client/eas.json` (development / preview APK
+      / production AAB profiles, remote auto-incremented `versionCode`) and
+      `client/app.config.js`, which fails any non-development build whose
+      `EXPO_PUBLIC_API_URL` isn't https and takes the gitignored Firebase
+      file from an EAS file variable. Steps in `client/RELEASE.md`.
+- [ ] (BLOCKED on Expo account + domain) First production build:
+      `eas init` (commit the projectId it writes), set the production EAS
+      env vars + `GOOGLE_SERVICES_JSON` file var, build, and **back up the
+      upload keystore** off this laptop. Enrol in **Play App Signing** on
+      first upload. (`client/RELEASE.md`)
 
 **Policy + listing (Play Console)**
 
-- [ ] **Privacy policy** — public URL, mandatory because the app collects
-      precise *and background* location. Say what's collected, why, who it's
-      shared with (Tomorrow.io gets coordinates; Firebase gets the push
-      token; RevenueCat gets the user id), retention, and how to delete.
+- [ ] **Privacy policy + Terms — drafted, need K's review.**
+      `server/deploy/caddy/legal/{privacy,terms}.html`, served at
+      `/legal/privacy` and `/legal/terms`, written against what the schema
+      actually stores. Caddy fills `OPERATOR_NAME` / `SUPPORT_EMAIL` from
+      `deploy/.env`. Before launch: read both, set those two values (the
+      support inbox must be monitored — deletion requests go there), and add
+      a governing-law clause to the terms. Plain-language drafts, not legal
+      advice.
 - [ ] **Data safety form** — location (precise, background), email,
       device ID (FCM token), purchase history; all encrypted in transit;
       deletion available.

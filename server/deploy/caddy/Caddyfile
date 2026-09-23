@@ -42,7 +42,27 @@
 
 	encode gzip
 
-	reverse_proxy app:3000 {
-		header_up X-Real-IP {remote_host}
+	# HSTS lives here, not in the app: Caddy is what terminates TLS, so it is
+	# the one that knows the connection is really HTTPS (the app registers
+	# helmet with hsts:false for that reason). Mostly for the /legal pages —
+	# Android's HTTP stack ignores HSTS for API calls.
+	header Strict-Transport-Security "max-age=31536000"
+
+	# Public legal pages: privacy policy, terms, account-deletion
+	# instructions. Store listings and the paywall link here, so they must be
+	# reachable without the app. `templates` fills {{env "..."}} placeholders
+	# from this container's environment (OPERATOR_NAME, SUPPORT_EMAIL) —
+	# which is also why no secret may ever be added to caddy's environment.
+	handle_path /legal/* {
+		root * /srv/legal
+		try_files {path}.html
+		templates
+		file_server
+	}
+
+	handle {
+		reverse_proxy app:3000 {
+			header_up X-Real-IP {remote_host}
+		}
 	}
 }

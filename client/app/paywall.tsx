@@ -1,6 +1,11 @@
 // Subscription paywall (spec §2: subscription with free trial).
 // Lists RevenueCat offering packages; purchase/restore update the
 // subscription query. Server stays authoritative via the RC webhook.
+//
+// Store policy (Google Play subscriptions policy; Apple 3.1.2 later) needs
+// the price *per period*, any free trial, how renewal and cancellation work,
+// and Terms + Privacy links — all visible before the user taps buy. Removing
+// any of that from this screen risks a store rejection.
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
@@ -8,6 +13,8 @@ import { useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Linking,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -16,7 +23,9 @@ import type { PurchasesPackage } from 'react-native-purchases';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { revenueCatConfigured } from '@/src/lib/config';
+import { useSubscription } from '@/src/hooks/useSubscription';
+import { config, revenueCatConfigured } from '@/src/lib/config';
+import { planTerms } from '@/src/lib/subscriptionTerms';
 import {
   getOfferingPackages,
   purchase,
@@ -34,9 +43,28 @@ const COMPARISON: { feature: string; free: string; premium: string }[] = [
   { feature: 'Rain sensitivity', free: 'Any rain', premium: 'Light, moderate or heavy' },
 ];
 
+// How renewal and cancellation work on each store. Wording follows each
+// store's own cancellation path so users can actually find it.
+const RENEWAL_TERMS = Platform.select({
+  ios:
+    'Payment is charged to your Apple ID when you confirm. Subscriptions ' +
+    'renew automatically at the price shown unless cancelled at least 24 ' +
+    'hours before the end of the current period. Manage or cancel in ' +
+    'Settings → your name → Subscriptions.',
+  default:
+    'Subscriptions renew automatically at the price shown until you cancel. ' +
+    'Cancel any time in Google Play → Profile → Payments & subscriptions → ' +
+    'Subscriptions; you keep Premium until the end of the period you have ' +
+    'paid for. If you cancel during a free trial, you are not charged.',
+});
+
 export default function PaywallScreen() {
   const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
+  const subscription = useSubscription();
+  // The store's own "manage subscription" page. RevenueCat provides it once
+  // the user has bought something; null for users who never subscribed.
+  const managementUrl = subscription.data?.info.managementURL ?? null;
 
   const packages = useQuery({
     queryKey: ['offerings'],
@@ -120,21 +148,37 @@ export default function PaywallScreen() {
         <ActivityIndicator size="large" />
       )}
 
-      {packages.data?.map((pkg) => (
-        <Pressable
-          key={pkg.identifier}
-          style={[styles.plan, busy && styles.disabled]}
-          disabled={busy}
-          onPress={() => buy(pkg)}
-        >
-          <ThemedText style={styles.planTitle}>
-            {pkg.product.title}
-          </ThemedText>
-          <ThemedText style={styles.planPrice}>
-            {pkg.product.priceString}
+      {packages.data?.map((pkg) => {
+        const terms = planTerms(pkg.product);
+        return (
+          <Pressable
+            key={pkg.identifier}
+            style={[styles.plan, busy && styles.disabled]}
+            disabled={busy}
+            onPress={() => buy(pkg)}
+          >
+            <ThemedText style={styles.planTitle}>
+              {pkg.product.title}
+            </ThemedText>
+            <ThemedText style={styles.planPrice}>{terms.price}</ThemedText>
+            {terms.offer && (
+              <ThemedText style={styles.planOffer}>{terms.offer}</ThemedText>
+            )}
+          </Pressable>
+        );
+      })}
+
+      {revenueCatConfigured && (
+        <ThemedText style={styles.fineprint}>{RENEWAL_TERMS}</ThemedText>
+      )}
+
+      {subscription.data?.isActive && managementUrl && (
+        <Pressable onPress={() => Linking.openURL(managementUrl)}>
+          <ThemedText type="link" style={styles.center}>
+            Manage or cancel subscription
           </ThemedText>
         </Pressable>
-      ))}
+      )}
 
       <Pressable onPress={onRestore} disabled={busy}>
         <ThemedText type="link" style={styles.center}>
@@ -146,6 +190,20 @@ export default function PaywallScreen() {
           Not now
         </ThemedText>
       </Pressable>
+
+      <ThemedView style={styles.legalRow}>
+        <Pressable onPress={() => Linking.openURL(config.legal.termsUrl)}>
+          <ThemedText type="link" style={styles.legalLink}>
+            Terms of Use
+          </ThemedText>
+        </Pressable>
+        <ThemedText style={styles.muted}>·</ThemedText>
+        <Pressable onPress={() => Linking.openURL(config.legal.privacyUrl)}>
+          <ThemedText type="link" style={styles.legalLink}>
+            Privacy Policy
+          </ThemedText>
+        </Pressable>
+      </ThemedView>
     </ScrollView>
   );
 }
@@ -170,6 +228,16 @@ const styles = StyleSheet.create({
   },
   planTitle: { fontWeight: '600', fontSize: 16 },
   planPrice: { opacity: 0.8 },
+  planOffer: { color: '#2e7d32', fontWeight: '600' },
+  fineprint: { fontSize: 12, opacity: 0.6, lineHeight: 17 },
+  legalRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 4,
+  },
+  legalLink: { fontSize: 13 },
   disabled: { opacity: 0.6 },
   center: { textAlign: 'center', marginTop: 8 },
 });

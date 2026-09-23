@@ -1,12 +1,14 @@
 // Home screen (spec §6.1 permissions + in-app weather display).
 // Prompts for location/notification permission with a clear rationale,
-// then shows the short-term forecast for the user's location.
+// then shows the short-term forecast for the user's location. Background
+// location always goes through LocationDisclosure first (Play policy).
 
 import { useQueryClient } from '@tanstack/react-query';
 import * as Location from 'expo-location';
 import { useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
+import { LocationDisclosure } from '@/components/location-disclosure';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { router } from 'expo-router';
@@ -15,7 +17,10 @@ import { useSubscription } from '@/src/hooks/useSubscription';
 import { useWeather } from '@/src/hooks/useWeather';
 import { apiRequest } from '@/src/lib/api';
 import { registerForPush } from '@/src/services/push';
-import { startLocationUpdates } from '@/src/services/location';
+import {
+  hasBackgroundLocationPermission,
+  startLocationUpdates,
+} from '@/src/services/location';
 
 const PRECIP: Record<number, string> = {
   0: 'Clear',
@@ -33,6 +38,23 @@ export default function HomeScreen() {
   const qc = useQueryClient();
   const [locOn, setLocOn] = useState(false);
   const [pushOn, setPushOn] = useState(false);
+  const [showDisclosure, setShowDisclosure] = useState(false);
+
+  // Entry point for the "Enable location alerts" button. Anyone who hasn't
+  // already granted background location sees the disclosure first; the OS
+  // prompt only follows an explicit Continue.
+  async function onEnableLocationPress() {
+    if (await hasBackgroundLocationPermission()) {
+      await enableLocation();
+    } else {
+      setShowDisclosure(true);
+    }
+  }
+
+  async function onDisclosureAccept() {
+    setShowDisclosure(false);
+    await enableLocation();
+  }
 
   async function enableLocation() {
     const ok = await startLocationUpdates();
@@ -100,14 +122,22 @@ export default function HomeScreen() {
 
       <ThemedView style={styles.card}>
         <ThemedText type="subtitle">Setup</ThemedText>
+        <ThemedText style={styles.muted}>
+          Location lets us warn you before weather reaches your exact spot,
+          even when the app is closed.
+        </ThemedText>
         <Pressable
           style={[styles.btn, locOn && styles.btnDone]}
-          onPress={enableLocation}
+          onPress={onEnableLocationPress}
         >
           <ThemedText style={styles.btnText}>
             {locOn ? '✓ Location alerts on' : 'Enable location alerts'}
           </ThemedText>
         </Pressable>
+        <ThemedText style={styles.muted}>
+          Notifications are how the warnings reach you. We only send weather
+          alerts — no marketing.
+        </ThemedText>
         <Pressable
           style={[styles.btn, pushOn && styles.btnDone]}
           onPress={enablePush}
@@ -175,6 +205,12 @@ export default function HomeScreen() {
       <Pressable style={styles.signOut} onPress={() => signOut()}>
         <ThemedText type="link">Sign out</ThemedText>
       </Pressable>
+
+      <LocationDisclosure
+        visible={showDisclosure}
+        onAccept={onDisclosureAccept}
+        onDecline={() => setShowDisclosure(false)}
+      />
 
       <Pressable
         style={styles.deleteAccount}

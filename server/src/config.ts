@@ -31,7 +31,7 @@ export const config = {
   port: Number(optional("PORT", "3000")),
 
   // Trust X-Forwarded-For so `request.ip` is the real client address when we
-  // sit behind the Nginx reverse proxy (spec §7). Rate limiting keys on that
+  // sit behind the Caddy reverse proxy (spec §7). Rate limiting keys on that
   // IP, so leaving this off in production would bucket every request under
   // the proxy's address. Off by default: trusting the header when nothing
   // strips it would let a client spoof its own IP.

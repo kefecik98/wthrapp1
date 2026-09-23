@@ -1,0 +1,48 @@
+{{/*
+  Account deletion instructions. Served by Caddy at /legal/delete-account.
+  Google Play requires a web page where users can request deletion without
+  reinstalling the app; this URL goes in Play Console's Data safety form.
+  K: review before launch.
+  (Template comment: stripped by Caddy, never sent to browsers.)
+*/}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WeatherAlert — Delete your account</title>
+<style>
+  body { font: 16px/1.6 system-ui, sans-serif; max-width: 42rem; margin: 0 auto; padding: 1.5rem 1rem 4rem; color: #1b1b1b; background: #fff; }
+  h1 { font-size: 1.6rem; } h2 { font-size: 1.15rem; margin-top: 2rem; }
+  @media (prefers-color-scheme: dark) { body { background: #151718; color: #ececec; } a { color: #6cb6ff; } }
+</style>
+</head>
+<body>
+<h1>Delete your WeatherAlert account</h1>
+
+<h2>In the app (immediate)</h2>
+<ol>
+  <li>Open WeatherAlert and sign in.</li>
+  <li>On the home screen, scroll down and tap <strong>Delete account</strong>.</li>
+  <li>Confirm. Your account is deleted straight away.</li>
+</ol>
+
+<h2>Without the app</h2>
+<p>Email <a href="mailto:{{env "SUPPORT_EMAIL"}}?subject=Delete%20my%20WeatherAlert%20account">{{env "SUPPORT_EMAIL"}}</a>
+from the email address you signed up with, with the subject
+<em>Delete my WeatherAlert account</em>. We will delete the account within 30
+days and reply to confirm.</p>
+
+<h2>What is deleted</h2>
+<p>Everything we hold about you: your email and sign-in details, your location,
+alert settings, alert history, push token and subscription record. Copies may
+remain in database backups for up to 14 days before those backups are deleted.
+Nothing is kept after that.</p>
+
+<h2>Subscriptions</h2>
+<p>Deleting your account does <strong>not</strong> cancel a Premium
+subscription — Google Play bills it, not us. Cancel it in Google Play →
+Profile → Payments &amp; subscriptions → Subscriptions.</p>
+
+<p><a href="/legal/privacy">Privacy Policy</a></p>
+</body>
+</html>

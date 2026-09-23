@@ -195,6 +195,17 @@ curl -sS https://api.example.com/health             # from anywhere — the real
 The last one exercises the whole path: DNS → VPS → tunnel → Caddy → app. Caddy
 issues the certificate on the first HTTPS request, so give it a few seconds.
 
+Then check the public legal pages, which Caddy serves itself (they don't touch
+the app) with `OPERATOR_NAME` and `SUPPORT_EMAIL` filled in from `.env`:
+
+```bash
+curl -sS https://api.example.com/legal/privacy | grep -i mailto   # your SUPPORT_EMAIL
+```
+
+These three URLs — `/legal/privacy`, `/legal/terms`, `/legal/delete-account`
+— are what the Play Console listing, the Data safety form and the in-app
+paywall link to. They must stay up and stable once the app ships.
+
 Finally, point the client at it — `client/.env`:
 
 ```

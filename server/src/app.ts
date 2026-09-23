@@ -48,7 +48,7 @@ export async function buildServer(
     // Quiet during tests; production boot turns the logger back on.
     logger: config.env !== "test",
     bodyLimit: 1_048_576,
-    // Behind Nginx, the socket address is the proxy's. Trusting
+    // Behind Caddy, the socket address is the proxy's. Trusting
     // X-Forwarded-For makes `request.ip` — and therefore every rate-limit
     // bucket — key on the real client. Opt-in via TRUST_PROXY, because
     // trusting the header with no proxy in front lets a client spoof its IP.
@@ -59,8 +59,8 @@ export async function buildServer(
     ajv: { customOptions: { removeAdditional: false } },
   });
 
-  // Security headers. HSTS is left to Nginx, which terminates TLS and knows
-  // whether the connection is actually HTTPS.
+  // Security headers. HSTS is left to Caddy, which terminates TLS and knows
+  // whether the connection is actually HTTPS (see deploy/caddy/Caddyfile).
   await app.register(helmet, { hsts: false });
 
   // Global default bucket. Individual routes tighten it (auth) or opt out

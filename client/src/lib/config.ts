@@ -2,9 +2,20 @@
 // Expo inlines any EXPO_PUBLIC_* env var at build time, so the API base
 // URL can be set per environment without code changes.
 
+// e.g. https://api.weatheralert.example — see client/.env.example
+const apiBaseUrl = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3000";
+
 export const config = {
-  // e.g. https://api.weatheralert.example — see client/.env.example
-  apiBaseUrl: process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3000",
+  apiBaseUrl,
+
+  // Public legal pages linked from the paywall (store policy requires them
+  // before purchase). By default they're the static pages Caddy serves on the
+  // API domain (server/deploy/caddy/legal/); override if they move elsewhere.
+  legal: {
+    privacyUrl:
+      process.env.EXPO_PUBLIC_PRIVACY_URL ?? `${apiBaseUrl}/legal/privacy`,
+    termsUrl: process.env.EXPO_PUBLIC_TERMS_URL ?? `${apiBaseUrl}/legal/terms`,
+  },
 
   // Google OAuth client IDs (from Google Cloud Console). Empty until
   // configured — when empty the Google button shows an informative alert.

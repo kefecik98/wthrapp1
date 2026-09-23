@@ -2,8 +2,9 @@
 // Mocks react-query's useQuery + useQueryClient and the RC purchases
 // service so the screen can render against canned data.
 
-import { render, screen } from "@testing-library/react-native";
+import { fireEvent, render, screen } from "@testing-library/react-native";
 import React from "react";
+import { Linking } from "react-native";
 
 import PaywallScreen from "@/app/paywall";
 
@@ -28,11 +29,25 @@ jest.mock("@/src/services/purchases", () => ({
 
 jest.mock("@/src/lib/config", () => ({
   revenueCatConfigured: true,
+  config: {
+    legal: {
+      privacyUrl: "https://api.test/legal/privacy",
+      termsUrl: "https://api.test/legal/terms",
+    },
+  },
+}));
+
+// Subscription status is its own hook (it also calls useQuery, which is
+// stubbed above for offerings), so control it separately.
+const mockSubscription = jest.fn();
+jest.mock("@/src/hooks/useSubscription", () => ({
+  useSubscription: () => mockSubscription(),
 }));
 
 describe("PaywallScreen", () => {
   beforeEach(() => {
     mockQueryFn.mockReset();
+    mockSubscription.mockReturnValue({ data: undefined });
   });
 
   it("shows the title even while offerings load", () => {
@@ -50,19 +65,73 @@ describe("PaywallScreen", () => {
       data: [
         {
           identifier: "monthly",
-          product: { title: "Monthly", priceString: "$4.99" },
+          product: {
+            title: "Monthly",
+            priceString: "$4.99",
+            subscriptionPeriod: "P1M",
+            introPrice: null,
+          },
         },
         {
           identifier: "annual",
-          product: { title: "Annual", priceString: "$39.99" },
+          product: {
+            title: "Annual",
+            priceString: "$39.99",
+            subscriptionPeriod: "P1Y",
+            introPrice: {
+              price: 0,
+              priceString: "$0.00",
+              cycles: 1,
+              period: "P7D",
+              periodUnit: "DAY",
+              periodNumberOfUnits: 7,
+            },
+          },
         },
       ],
     });
     render(<PaywallScreen />);
     expect(screen.getByText("Monthly")).toBeTruthy();
-    expect(screen.getByText("$4.99")).toBeTruthy();
     expect(screen.getByText("Annual")).toBeTruthy();
-    expect(screen.getByText("$39.99")).toBeTruthy();
+    // Store policy: price must be shown *per billing period*, with any trial.
+    expect(screen.getByText("$4.99 / month")).toBeTruthy();
+    expect(screen.getByText("$39.99 / year")).toBeTruthy();
+    expect(
+      screen.getByText("7-day free trial, then $39.99 / year"),
+    ).toBeTruthy();
+  });
+
+  it("states how renewal and cancellation work", () => {
+    mockQueryFn.mockReturnValue({ isLoading: false, data: [] });
+    render(<PaywallScreen />);
+    expect(screen.getByText(/renew automatically/)).toBeTruthy();
+  });
+
+  it("links to the Terms of Use and Privacy Policy", () => {
+    const open = jest.spyOn(Linking, "openURL").mockResolvedValue(true);
+    mockQueryFn.mockReturnValue({ isLoading: false, data: [] });
+    render(<PaywallScreen />);
+
+    fireEvent.press(screen.getByText("Terms of Use"));
+    expect(open).toHaveBeenLastCalledWith("https://api.test/legal/terms");
+
+    fireEvent.press(screen.getByText("Privacy Policy"));
+    expect(open).toHaveBeenLastCalledWith("https://api.test/legal/privacy");
+  });
+
+  it("offers the store's manage page only to active subscribers", () => {
+    mockQueryFn.mockReturnValue({ isLoading: false, data: [] });
+    render(<PaywallScreen />);
+    expect(screen.queryByText("Manage or cancel subscription")).toBeNull();
+
+    mockSubscription.mockReturnValue({
+      data: {
+        isActive: true,
+        info: { managementURL: "https://play.google.com/store/account/subscriptions" },
+      },
+    });
+    render(<PaywallScreen />);
+    expect(screen.getByText("Manage or cancel subscription")).toBeTruthy();
   });
 
   it("renders restore and dismiss links", () => {

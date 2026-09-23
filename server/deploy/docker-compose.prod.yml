@@ -70,8 +70,13 @@ services:
     environment:
       API_DOMAIN: ${API_DOMAIN:?set API_DOMAIN in deploy/.env}
       ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in deploy/.env}
+      # Rendered into the public /legal pages by Caddy's `templates`. Nothing
+      # secret belongs in this environment block — templates can read it.
+      OPERATOR_NAME: ${OPERATOR_NAME:?set OPERATOR_NAME in deploy/.env}
+      SUPPORT_EMAIL: ${SUPPORT_EMAIL:?set SUPPORT_EMAIL in deploy/.env}
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy/legal:/srv/legal:ro
       - caddy_data:/data      # issued certificates and ACME account keys
       - caddy_config:/config
     depends_on:

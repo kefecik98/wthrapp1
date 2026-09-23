@@ -41,7 +41,20 @@ TaskManager.defineTask(LOCATION_TASK, async ({ data, error }) => {
 });
 
 /**
+ * True when background location is already granted, so the in-app
+ * disclosure (components/location-disclosure.tsx) can be skipped — Play only
+ * requires it before the permission *request*, and re-showing it to someone
+ * who already agreed is just friction.
+ */
+export async function hasBackgroundLocationPermission(): Promise<boolean> {
+  const bg = await Location.getBackgroundPermissionsAsync();
+  return bg.status === "granted";
+}
+
+/**
  * Request permissions and start background location updates.
+ * Callers must show the location disclosure first unless
+ * hasBackgroundLocationPermission() is already true.
  * Returns false if the user denied the required permission.
  */
 export async function startLocationUpdates(): Promise<boolean> {

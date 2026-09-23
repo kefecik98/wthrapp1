@@ -1,0 +1,116 @@
+{{/*
+  WeatherAlert privacy policy. Served by Caddy at /legal/privacy.
+  {{env "..."}} placeholders are filled from server/deploy/.env by Caddy's
+  `templates` directive. Keep this in step with what the code actually stores
+  (server/prisma/schema.prisma) and with the in-app location disclosure
+  (client/components/location-disclosure.tsx). K: review before launch —
+  this is a plain-language draft, not legal advice.
+  (Template comment: stripped by Caddy, never sent to browsers.)
+*/}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WeatherAlert — Privacy Policy</title>
+<style>
+  body { font: 16px/1.6 system-ui, sans-serif; max-width: 42rem; margin: 0 auto; padding: 1.5rem 1rem 4rem; color: #1b1b1b; background: #fff; }
+  h1 { font-size: 1.6rem; } h2 { font-size: 1.15rem; margin-top: 2rem; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.95rem; }
+  td, th { border: 1px solid #ddd; padding: 0.4rem 0.6rem; text-align: left; vertical-align: top; }
+  .muted { color: #666; }
+  @media (prefers-color-scheme: dark) { body { background: #151718; color: #ececec; } td, th { border-color: #333; } .muted { color: #9ba1a6; } a { color: #6cb6ff; } }
+</style>
+</head>
+<body>
+<h1>WeatherAlert Privacy Policy</h1>
+<p class="muted">Last updated: 23 September 2026</p>
+
+<p>WeatherAlert warns you before rain, snow, hail, lightning or strong wind
+reaches where you are. To do that it needs your location, including while the
+app is closed. This page explains what we collect, why, who else sees it, and
+how to delete it.</p>
+
+<p>WeatherAlert is operated by {{env "OPERATOR_NAME"}}. Questions:
+<a href="mailto:{{env "SUPPORT_EMAIL"}}">{{env "SUPPORT_EMAIL"}}</a>.</p>
+
+<h2>What we collect</h2>
+<table>
+  <tr><th>Data</th><th>Why</th></tr>
+  <tr><td><strong>Location</strong> — your most recent GPS coordinates, their
+    accuracy, and when they were recorded. Collected in the background, while
+    the app is closed, if you allow it.</td>
+    <td>To check the forecast where you are and alert you before weather
+    arrives. We keep only your latest location; each update overwrites the
+    previous one. We do not keep a location history.</td></tr>
+  <tr><td><strong>Account</strong> — your email address, and either a
+    password (stored only as a one-way hash) or the account identifier Google
+    provides when you sign in with Google.</td>
+    <td>To sign you in and keep your settings.</td></tr>
+  <tr><td><strong>Alert settings</strong> — which weather types you want,
+    how far ahead, rain sensitivity, notifications on/off.</td>
+    <td>To send only the alerts you asked for.</td></tr>
+  <tr><td><strong>Alert history</strong> — the type of each alert we sent you
+    and when.</td>
+    <td>So we never send you the same alert twice.</td></tr>
+  <tr><td><strong>Push token</strong> — an identifier for your device issued
+    by Firebase Cloud Messaging.</td>
+    <td>To deliver notifications to your phone.</td></tr>
+  <tr><td><strong>Subscription status</strong> — whether you have Premium,
+    which plan, and when it renews or expires.</td>
+    <td>To unlock Premium features. Payment is handled by Google Play; we
+    never see your card or bank details.</td></tr>
+  <tr><td><strong>Server logs</strong> — IP address and request details.</td>
+    <td>To keep the service running and to limit abuse. Logs are rotated and
+    not used for anything else.</td></tr>
+</table>
+
+<p>We do not use advertising, analytics or tracking SDKs, and we never sell
+your data.</p>
+
+<h2>Who else sees it</h2>
+<p>Our servers are run by us, and every connection to them is encrypted. We
+use these services to provide the app, and share only what each one needs:</p>
+<ul>
+  <li><strong>Tomorrow.io</strong> (weather data) receives map coordinates in
+    your area so it can return the forecast. We do not send your name, email
+    or any account identifier with them.</li>
+  <li><strong>Google Firebase Cloud Messaging</strong> receives your push token
+    and the text of each alert, to deliver it to your device.</li>
+  <li><strong>RevenueCat</strong> and <strong>Google Play</strong> handle
+    subscriptions. RevenueCat receives your WeatherAlert account ID and your
+    purchase records.</li>
+  <li><strong>Google Sign-In</strong>, if you choose it, tells us your email
+    and Google account identifier.</li>
+</ul>
+<p>We may disclose data if the law requires it.</p>
+
+<h2>How long we keep it</h2>
+<p>We keep your data for as long as you have an account. When you delete your
+account, everything above is deleted from our database immediately. Copies
+may remain in database backups for up to 14 days before
+those backups are themselves deleted.</p>
+
+<h2>Your choices</h2>
+<ul>
+  <li><strong>Location and notifications:</strong> you can turn either off at
+    any time in your phone's settings. Alerts stop working without them.</li>
+  <li><strong>Delete your account:</strong> in the app, tap <em>Delete
+    account</em> on the home screen. If you can't use the app, see
+    <a href="/legal/delete-account">how to request deletion</a>.</li>
+  <li><strong>Access or correction:</strong> email us and we will send you a
+    copy of your data or correct it.</li>
+</ul>
+
+<h2>Security</h2>
+<p>All traffic is encrypted with TLS. Passwords are stored as salted one-way
+hashes. The database is not reachable from the internet.</p>
+
+<h2>Children</h2>
+<p>WeatherAlert is not directed at children under 13, and we do not knowingly
+collect their data.</p>
+
+<h2>Changes</h2>
+<p>If we change this policy, we will update the date above, and tell you in
+the app if the change is significant.</p>
+</body>
+</html>
