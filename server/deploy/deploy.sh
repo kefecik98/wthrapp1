@@ -2,80 +2,101 @@
 #
 # WeatherAlert server deploy script.
 #
-# This automates the manual "Updates (recurring)" steps from DEPLOY.md §5.
-# It runs ON the app VM — invoked by the self-hosted GitHub Actions runner
-# (see .github/workflows/ci.yml, the `deploy` job) after tests pass, or by
-# hand if you ever need to deploy without CI.
+# Runs ON the app VM — invoked by the self-hosted GitHub Actions runner (see
+# .github/workflows/ci.yml, the `deploy` job) after tests pass and the image
+# has been published, or by hand if you ever need to deploy without CI.
+#
+# Unlike the old PM2 version, this script does NOT build anything. CI builds
+# the image on GitHub's runners and pushes it to GHCR; the rack only pulls a
+# tagged artifact and restarts. That is what makes rollback trivial: point
+# IMAGE_TAG at an older commit SHA and run this again.
 #
 # What it does, in order:
-#   1. Sync the canonical app directory to the exact commit on origin/main.
-#   2. Install dependencies and generate the Prisma client.
-#   3. Apply any new database migrations (forward-only, safe to re-run).
-#   4. Compile TypeScript to dist/.
-#   5. Reload the app under PM2 with zero-downtime, then health-check it.
-#
-# It is idempotent: running it twice on the same commit is a no-op reload.
-# Any failing step aborts the whole script (set -e), so a broken deploy
-# turns the GitHub Actions job red instead of silently shipping.
+#   1. Sync the repo checkout (for compose files and the Caddyfile only).
+#   2. Pull the exact image tag being deployed.
+#   3. Apply database migrations as a one-shot container, before the new app
+#      starts — so a failed migration aborts the deploy with the old version
+#      still serving.
+#   4. Recreate the stack.
+#   5. Health-check, and roll the app back to the previous image if it fails.
 
 set -euo pipefail
 
-# The canonical clone the live app runs from. Overridable for testing, but in
-# production this is the git checkout created during the one-time bootstrap
-# (DEPLOY.md §2). NOTE: this is NOT the runner's own workspace — the runner
-# just executes this script; the script operates on the real app directory.
 DEPLOY_DIR="${DEPLOY_DIR:-/opt/weatheralert}"
-PM2_APP="weatheralert-api"
+COMPOSE_DIR="${DEPLOY_DIR}/server/deploy"
+COMPOSE_FILE="${COMPOSE_DIR}/docker-compose.prod.yml"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:3000/health}"
+
+compose() { docker compose -f "${COMPOSE_FILE}" "$@"; }
 
 echo "==> Deploying to ${DEPLOY_DIR}"
 
-# 1. Sync to origin/main exactly. `reset --hard` (not `pull`) guarantees the
-#    working tree matches the commit regardless of local drift. Gitignored
-#    files (.env, firebase-service-account.json) are untracked, so they are
-#    left untouched.
+# 1. Sync the checkout. Only the compose file, Caddyfile and frpc.toml are
+#    read from here — the application itself ships as an image. `reset --hard`
+#    guarantees the tree matches the commit regardless of local drift;
+#    deploy/.env and firebase-service-account.json are untracked and survive.
 git -C "${DEPLOY_DIR}" fetch --all --prune
 git -C "${DEPLOY_DIR}" reset --hard origin/main
-echo "==> Now at $(git -C "${DEPLOY_DIR}" rev-parse --short HEAD)"
+echo "==> Repo now at $(git -C "${DEPLOY_DIR}" rev-parse --short HEAD)"
 
-cd "${DEPLOY_DIR}/server"
+cd "${COMPOSE_DIR}"
 
-# 2. Dependencies. `npm ci` installs exactly what package-lock.json pins,
-#    including devDependencies — the build (typescript) and migrations
-#    (prisma CLI) need them.
-echo "==> Installing dependencies"
-npm ci
-npx prisma generate
+if [[ ! -f .env ]]; then
+  echo "!!! ${COMPOSE_DIR}/.env is missing — copy .env.example and fill it in" >&2
+  exit 1
+fi
 
-# 3. Migrations. `migrate deploy` only applies already-created migrations and
-#    never generates or resets — the safe production command. Destructive
-#    (non-additive) migrations still warrant a Proxmox snapshot first; see
-#    DEPLOY.md §5.
+# Remember what we were running, so a failed health check can go back to it.
+PREVIOUS_TAG="$(grep -E '^IMAGE_TAG=' .env | cut -d= -f2- || true)"
+echo "==> Previously deployed tag: ${PREVIOUS_TAG:-<none>}"
+
+# 2. The tag to deploy. CI passes the commit SHA; a manual run uses whatever
+#    is already pinned in .env.
+if [[ -n "${IMAGE_TAG:-}" ]]; then
+  echo "==> Pinning IMAGE_TAG=${IMAGE_TAG}"
+  if grep -qE '^IMAGE_TAG=' .env; then
+    sed -i "s|^IMAGE_TAG=.*|IMAGE_TAG=${IMAGE_TAG}|" .env
+  else
+    echo "IMAGE_TAG=${IMAGE_TAG}" >> .env
+  fi
+fi
+
+echo "==> Pulling images"
+compose pull
+
+# 3. Migrations first, as a one-shot. --no-deps keeps this from starting the
+#    app; the db service is brought up explicitly because migrations obviously
+#    need it. `migrate deploy` is forward-only and safe to re-run.
 echo "==> Applying database migrations"
-npx prisma migrate deploy
+compose up -d db
+compose run --rm --no-deps app npx prisma migrate deploy
 
-# 4. Build.
-echo "==> Building"
-npm run build
+# 4. Start/refresh everything else.
+echo "==> Starting stack"
+compose up -d --remove-orphans
 
-# 5. Reload under PM2. `startOrReload` starts the app if it isn't running yet
-#    and does a zero-downtime reload if it is. `--update-env` re-reads env.
-#    SIGTERM → graceful shutdown handler in src/index.ts (stops cron, closes
-#    Fastify, disconnects Prisma).
-echo "==> Reloading PM2 app ${PM2_APP}"
-pm2 startOrReload deploy/ecosystem.config.cjs --update-env
-pm2 save
-
-# 6. Health check — poll a few times so we don't race the app's startup.
+# 5. Health check against the loopback-published app port.
 echo "==> Health check ${HEALTH_URL}"
-for attempt in 1 2 3 4 5; do
-  if curl -fsS "${HEALTH_URL}" >/dev/null; then
+for attempt in 1 2 3 4 5 6 7 8 9 10; do
+  if curl -fsS "${HEALTH_URL}" >/dev/null 2>&1; then
     echo "==> Deploy OK (healthy on attempt ${attempt})"
+    compose ps
     exit 0
   fi
   echo "    not healthy yet (attempt ${attempt}); retrying in 3s"
   sleep 3
 done
 
-echo "!!! Health check failed after reload — check 'pm2 logs ${PM2_APP}'" >&2
+echo "!!! Health check failed after deploy" >&2
+
+# Roll the application back. Migrations are NOT rolled back — they are
+# forward-only by design, which is why non-additive ones want a Proxmox
+# snapshot first (DEPLOY.md §6).
+if [[ -n "${PREVIOUS_TAG}" && -n "${IMAGE_TAG:-}" && "${PREVIOUS_TAG}" != "${IMAGE_TAG}" ]]; then
+  echo "!!! Rolling app back to ${PREVIOUS_TAG}" >&2
+  sed -i "s|^IMAGE_TAG=.*|IMAGE_TAG=${PREVIOUS_TAG}|" .env
+  compose up -d app
+  echo "!!! Rolled back. Investigate with: docker compose -f ${COMPOSE_FILE} logs app" >&2
+fi
+
 exit 1

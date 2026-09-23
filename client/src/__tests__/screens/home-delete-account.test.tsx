@@ -14,7 +14,11 @@ jest.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({ invalidateQueries: jest.fn() }),
 }));
 jest.mock("@/src/services/push", () => ({ registerForPush: jest.fn() }));
-jest.mock("@/src/services/location", () => ({ startLocationUpdates: jest.fn() }));
+jest.mock("@/src/services/location", () => ({
+  hasBackgroundLocationPermission: jest.fn(),
+  startLocationUpdates: jest.fn(),
+  toReportedLocation: jest.fn(),
+}));
 jest.mock("@/src/lib/api", () => ({ apiRequest: jest.fn() }));
 jest.mock("@/src/hooks/useWeather", () => ({
   useWeather: () => ({ isLoading: false, isError: true, data: undefined }),

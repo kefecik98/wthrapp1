@@ -1,0 +1,64 @@
+{{/*
+  Terms of Use. Served by Caddy at /legal/terms and linked from the paywall.
+  K: review before launch — plain-language draft, not legal advice. It has no
+  governing-law clause yet; add one for your jurisdiction.
+  (Template comment: stripped by Caddy, never sent to browsers.)
+*/}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WeatherAlert — Terms of Use</title>
+<style>
+  body { font: 16px/1.6 system-ui, sans-serif; max-width: 42rem; margin: 0 auto; padding: 1.5rem 1rem 4rem; color: #1b1b1b; background: #fff; }
+  h1 { font-size: 1.6rem; } h2 { font-size: 1.15rem; margin-top: 2rem; }
+  .muted { color: #666; }
+  @media (prefers-color-scheme: dark) { body { background: #151718; color: #ececec; } .muted { color: #9ba1a6; } a { color: #6cb6ff; } }
+</style>
+</head>
+<body>
+<h1>WeatherAlert Terms of Use</h1>
+<p class="muted">Last updated: 23 September 2026</p>
+
+<p>These terms cover your use of the WeatherAlert app and service, operated by
+{{env "OPERATOR_NAME"}}. By creating an account you agree to them.</p>
+
+<h2>Forecasts are not guarantees</h2>
+<p>Alerts are based on weather forecasts, which can be wrong, late or missing.
+Notifications can also be delayed or blocked by your phone, network or
+settings. <strong>Do not rely on WeatherAlert for safety decisions.</strong>
+For severe weather, follow official warnings from your national weather
+service and local authorities.</p>
+
+<h2>Your account</h2>
+<p>Keep your sign-in details to yourself; you are responsible for activity on
+your account. You can delete it at any time from the app.</p>
+
+<h2>Premium subscriptions</h2>
+<ul>
+  <li>Premium is billed through Google Play at the price and period shown in
+    the app before you buy.</li>
+  <li>It renews automatically until you cancel. Cancel any time in Google Play
+    → Profile → Payments &amp; subscriptions → Subscriptions; you keep Premium
+    until the end of the period you have paid for.</li>
+  <li>If a free trial is offered and you cancel before it ends, you are not
+    charged.</li>
+  <li>Refunds are handled under Google Play's refund policy.</li>
+</ul>
+
+<h2>Acceptable use</h2>
+<p>Don't try to break, overload, reverse-engineer or gain unauthorised access
+to the service, or use it to do anything unlawful. We may suspend accounts
+that do.</p>
+
+<h2>Changes and availability</h2>
+<p>We may change or discontinue features. If we change these terms materially,
+we will tell you in the app. The service is provided "as is", without
+warranties, and to the extent the law allows we are not liable for losses
+arising from missed, late or inaccurate alerts.</p>
+
+<h2>Contact</h2>
+<p><a href="mailto:{{env "SUPPORT_EMAIL"}}">{{env "SUPPORT_EMAIL"}}</a> ·
+<a href="/legal/privacy">Privacy Policy</a></p>
+</body>
+</html>

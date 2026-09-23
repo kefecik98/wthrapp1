@@ -1,0 +1,27 @@
+# WeatherAlert public front door — runs on the rented VPS, NOT on the rack.
+#
+#   docker compose up -d
+#
+# One container. It is a dumb TCP relay: it holds no certificate, no database
+# credentials, and no application code, and it cannot read any traffic that
+# passes through it. If the VPS is compromised, the attacker gets a relay —
+# not your users' data. That is why TLS terminates on the rack instead of here.
+#
+# Copy this directory plus .env to the VPS, e.g.:
+#   scp -r deploy/vps youruser@<VPS_IP>:~/weatheralert-frps
+name: weatheralert-frps
+
+services:
+  frps:
+    image: snowdreamtech/frps:${FRP_VERSION:?set FRP_VERSION in .env}
+    restart: unless-stopped
+    environment:
+      FRP_TOKEN: ${FRP_TOKEN:?set FRP_TOKEN in .env — must match the rack's}
+    volumes:
+      - ./frps.toml:/etc/frp/frps.toml:ro
+    ports:
+      # 443: public HTTPS. Raw TLS bytes, relayed to the rack untouched.
+      - "443:443"
+      # 7000: the control port the rack's frpc dials in on. Firewall this to
+      # your home IP if it is static (see DEPLOY.md §3).
+      - "7000:7000"

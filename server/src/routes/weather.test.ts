@@ -104,10 +104,8 @@ describe("GET /weather", () => {
     expect(body.location.lng).toBeCloseTo(-74.0);
     expect(Array.isArray(body.minutely)).toBe(true);
     expect(body.minutely).toHaveLength(1);
-    expect(mockFetch).toHaveBeenCalledWith(
-      expect.closeTo(40.7),
-      expect.closeTo(-74.0),
-    );
+    // Fetched at the centre of the stored point's forecast cell (0.1°).
+    expect(mockFetch).toHaveBeenCalledWith(40.75, -73.95);
   });
 
   it("returns 502 when the provider fails", async () => {

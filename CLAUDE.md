@@ -20,12 +20,12 @@ Monorepo with two independent npm projects:
 
 - `server/` — Node.js 22 + Fastify 5 + Prisma 6 + PostgreSQL. REST API plus an in-process `node-cron` alert engine.
 - `client/` — React Native + Expo (SDK 54) + expo-router, TypeScript, single codebase that must compile and run on iOS and Android.
-- `server/deploy/` — production deploy runbook (`DEPLOY.md`) + PM2 ecosystem + Nginx config for the Proxmox rack target (spec §7). `server/Dockerfile` is a fallback containerized path.
+- `server/deploy/` — production deploy runbook (`DEPLOY.md`), the Docker Compose stack, Caddy and frp tunnel configs. The canonical deploy is `server/Dockerfile` built by CI and run under Compose on one Proxmox VM; `ecosystem.config.cjs` + `nginx/` are the retired native-PM2 fallback. See "Deployment" below.
 - `weather-app-spec.md` — authoritative product/architecture spec (detailed; ~400 lines).
 - `CONTEXT.md` (repo root) — condensed orientation: product summary, tech stack, plus "What good looks like" / "What to avoid" guidance not in the spec.
 - `TODO.md` — living tracker of open work, blocked items (env/credentials), and pending product decisions.
 - `ACCOUNTS.md` — external accounts/credentials map: which service each env var consumes, signup cost, and free-tier limits.
-- `.github/workflows/ci.yml` — CI runs server typecheck + tests (against a real Postgres service) and client typecheck + lint + jest on push/PR. CI also enforces Prisma migration drift via `prisma migrate diff --exit-code`, so any `schema.prisma` change requires a committed migration alongside it.
+- `.github/workflows/ci.yml` — four jobs. `server` and `client` (tests, on GitHub's cloud) run on every push/PR; `image` (build + push to GHCR) and `deploy` (on the rack's self-hosted runner) run only on a push to `main` when `server` passed and the repo variable `DEPLOY_ENABLED=true`. CI also enforces Prisma migration drift via `prisma migrate diff --exit-code`, so any `schema.prisma` change requires a committed migration alongside it.
 - `server/trigger_cycle.ts` + `server/retry_push.sh` — ad-hoc scripts for manually firing an alert cycle / re-sending an FCM push during debugging; not part of the running app.
 
 There is no root `package.json`; run commands inside `server/` or `client/`.
@@ -87,11 +87,22 @@ The client and server cooperate to deliver one thing: a push notification fired 
 
 5. **Subscriptions**: client uses RevenueCat SDK (`client/src/services/purchases.ts`, keyed to the JWT-decoded user id). Server keeps `subscriptions` rows in sync from `POST /webhooks/revenuecat`. The webhook auth is a static Authorization-header shared secret (RevenueCat's documented model — *no* HMAC); `REVENUECAT_WEBHOOK_SECRET` must equal the header value set in the RevenueCat dashboard.
 
+## Deployment
+
+Full runbook: `server/deploy/DEPLOY.md`. The shape of it:
+
+- **One Proxmox VM** runs four containers via `server/deploy/docker-compose.prod.yml`: `db` (Postgres 16), `app`, `caddy` (TLS), `frpc` (tunnel client). A **second virtual disk** at `DATA_DIR` holds the Postgres data so it snapshots independently of the OS disk.
+- **A rented VPS** runs only `frps` (`server/deploy/vps/`) and is a dumb TCP relay on :443 — it holds no certificate and cannot read traffic. TLS terminates on the rack, in Caddy.
+- **Nothing dials in.** No inbound port is opened on the home router: `frpc` dials out to the VPS for traffic, and the self-hosted Actions runner dials out to GitHub for deploys. Keep this invariant — it is the reason for both the tunnel and the runner.
+- **Client IP** reaches the app via PROXY protocol v2: `frpc.toml`'s `transport.proxyProtocolVersion` and the Caddyfile's `proxy_protocol` listener wrapper are a matched pair. Break one and every user shares a rate-limit bucket.
+- **CI builds, the rack pulls.** The VM never builds; `deploy.sh` pulls a SHA-tagged image from GHCR, runs `prisma migrate deploy` as a one-shot container, then restarts. Rollback is pinning an older `IMAGE_TAG`; migrations are forward-only and do not roll back with it.
+
 ## Server-specific conventions
 
 - All config flows through `src/config.ts`; do not read `process.env` elsewhere. The one exception is `src/services/push.ts` reading `GOOGLE_APPLICATION_CREDENTIALS` — that var is consumed by the Firebase Admin SDK itself, not our config.
 - Validate at the boundary with Fastify JSON schemas on request bodies.
 - No native build steps in dependencies: `bcryptjs` (not `bcrypt`), built-in `fetch` (no axios).
+- The `prisma` CLI is a **production** dependency on purpose. The runtime image installs with `--omit=dev`, and deploys run `prisma migrate deploy` as a one-shot container from that same image — moving it back to devDependencies breaks migrations in production.
 - Dev-only routes in `src/routes/dev.ts` are registered only when `ENABLE_DEV_ROUTES=true` (a positive opt-in, so a missing/typo'd `NODE_ENV` can't expose them).
 - Every Tomorrow.io read goes through `src/services/forecastCache.ts` (`getMinutely`), never `fetchMinutely` directly — the grid-cell cache is shared by the alert engine and `GET /weather`, and its TTL is what bounds API spend.
 - Tests are vitest; the build uses `tsconfig.build.json` to exclude test files.

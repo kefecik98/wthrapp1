@@ -68,6 +68,16 @@ describe("getMinutely", () => {
     expect(forecastCacheSize()).toBe(1);
   });
 
+  it("fetches at the cell centre, not the caller's point", async () => {
+    mockFetch.mockResolvedValue(minutes("1"));
+
+    await getMinutely(40.71, -74.01);
+
+    // Default 0.1° cell: 40.7..40.8 / -74.1..-74.0 → centre 40.75 / -74.05.
+    // The provider never sees the user's own coordinates.
+    expect(mockFetch).toHaveBeenCalledWith(40.75, -74.05);
+  });
+
   it("fetches separately for points in different cells", async () => {
     mockFetch.mockResolvedValue(minutes("1"));
 

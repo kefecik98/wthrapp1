@@ -2,6 +2,7 @@
 // Loaded once at startup; throws early if a required variable is missing.
 
 import dotenv from "dotenv";
+import { LOCATION_GRID_DEG } from "./lib/grid";
 
 dotenv.config();
 
@@ -19,6 +20,21 @@ function optional(name: string, fallback: string): string {
   return process.env[name] ?? fallback;
 }
 
+/**
+ * Forecast cell size in degrees. Must be at least the location grid: users
+ * are only ever stored at LOCATION_GRID_DEG, so a finer forecast cell would
+ * cost more upstream calls without locating anyone more precisely.
+ */
+function forecastCellDeg(): number {
+  const value = Number(optional("FORECAST_CELL_DEG", "0.1"));
+  if (!(value >= LOCATION_GRID_DEG)) {
+    throw new Error(
+      `FORECAST_CELL_DEG must be a number >= ${LOCATION_GRID_DEG} (the location grid), got "${process.env.FORECAST_CELL_DEG}"`,
+    );
+  }
+  return value;
+}
+
 /** Read an optional boolean env var. Only the literal "true" enables it. */
 function flag(name: string, fallback = false): boolean {
   const value = process.env[name];
@@ -31,7 +47,7 @@ export const config = {
   port: Number(optional("PORT", "3000")),
 
   // Trust X-Forwarded-For so `request.ip` is the real client address when we
-  // sit behind the Nginx reverse proxy (spec §7). Rate limiting keys on that
+  // sit behind the Caddy reverse proxy (spec §7). Rate limiting keys on that
   // IP, so leaving this off in production would bucket every request under
   // the proxy's address. Off by default: trusting the header when nothing
   // strips it would let a client spoof its own IP.
@@ -60,6 +76,13 @@ export const config = {
   },
 
   forecast: {
+    // Size of a forecast cell, in degrees. Every user in a cell shares one
+    // forecast, fetched at the cell's centre. Smaller = more local forecasts
+    // but more cells, and each occupied cell costs ~1440/TTL-minutes calls a
+    // day. 0.1° (~11 km) keeps Tomorrow.io spend low; 0.03° matches the
+    // location grid and the ~3 km forecast models — use it once calls are
+    // cheap (self-hosted weather).
+    cellDeg: forecastCellDeg(),
     // How long a grid cell's forecast stays usable, across alert cycles and
     // in-app /weather requests. This is the main lever on Tomorrow.io spend:
     // calls/day/cell ≈ 1440 / (ttlMs / 60000), independent of cron cadence.

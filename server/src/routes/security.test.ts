@@ -51,7 +51,7 @@ describe("security headers", () => {
     expect(res.statusCode).toBe(200);
     expect(res.headers["x-content-type-options"]).toBe("nosniff");
     expect(res.headers["x-frame-options"]).toBeDefined();
-    // HSTS is Nginx's job — it terminates TLS and knows the scheme.
+    // HSTS is Caddy's job — it terminates TLS and knows the scheme.
     expect(res.headers["strict-transport-security"]).toBeUndefined();
   });
 });

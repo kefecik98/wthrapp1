@@ -1,6 +1,8 @@
 // Background location reporting (spec §6.2).
 // Foreground: periodic GPS. Background: significant-change updates.
-// Each fix is pushed to the backend via PUT /location.
+// Each fix is snapped to the location grid *on the phone* and only the cell
+// centre is pushed to PUT /location — the exact position never leaves the
+// device (see src/lib/grid.ts).
 //
 // The task runs outside React, so it reads the access token directly from
 // secure storage rather than from the Zustand store.
@@ -8,9 +10,21 @@
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
 import { config } from "../lib/config";
+import { snapToGrid, type GridPoint } from "../lib/grid";
 import { loadTokens } from "../lib/tokenStore";
 
 export const LOCATION_TASK = "wa-location-task";
+
+/**
+ * The only form in which a location is ever sent to the server: the centre
+ * of the grid cell the fix falls in. Every PUT /location body must come from
+ * here.
+ */
+export function toReportedLocation(
+  coords: Pick<Location.LocationObjectCoords, "latitude" | "longitude">,
+): GridPoint {
+  return snapToGrid(coords.latitude, coords.longitude);
+}
 
 // Defined at module load so the OS can resume it when the app is killed.
 TaskManager.defineTask(LOCATION_TASK, async ({ data, error }) => {
@@ -29,11 +43,7 @@ TaskManager.defineTask(LOCATION_TASK, async ({ data, error }) => {
         "Content-Type": "application/json",
         Authorization: `Bearer ${tokens.accessToken}`,
       },
-      body: JSON.stringify({
-        lat: fix.coords.latitude,
-        lng: fix.coords.longitude,
-        accuracy: fix.coords.accuracy ?? undefined,
-      }),
+      body: JSON.stringify(toReportedLocation(fix.coords)),
     });
   } catch {
     // Best-effort: the next fix will retry.
@@ -41,7 +51,20 @@ TaskManager.defineTask(LOCATION_TASK, async ({ data, error }) => {
 });
 
 /**
+ * True when background location is already granted, so the in-app
+ * disclosure (components/location-disclosure.tsx) can be skipped — Play only
+ * requires it before the permission *request*, and re-showing it to someone
+ * who already agreed is just friction.
+ */
+export async function hasBackgroundLocationPermission(): Promise<boolean> {
+  const bg = await Location.getBackgroundPermissionsAsync();
+  return bg.status === "granted";
+}
+
+/**
  * Request permissions and start background location updates.
+ * Callers must show the location disclosure first unless
+ * hasBackgroundLocationPermission() is already true.
  * Returns false if the user denied the required permission.
  */
 export async function startLocationUpdates(): Promise<boolean> {

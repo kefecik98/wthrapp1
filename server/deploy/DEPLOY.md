@@ -1,337 +1,399 @@
 # WeatherAlert server — deployment runbook
 
-Target: Proxmox host, two Ubuntu 24.04 LTS VMs.
+Target: one Proxmox VM (Ubuntu 24.04 LTS) running Docker, plus a small rented
+VPS acting as the public front door.
 
-| VM       | Purpose                       | Notes                          |
-|----------|-------------------------------|--------------------------------|
-| `app`    | Node + PM2 + Nginx + Certbot  | 2 vCPU / 4 GB RAM / 32 GB disk |
-| `db`     | Postgres 16                   | 2 vCPU / 4 GB RAM / 64 GB disk |
-
-Both VMs sit on the same Proxmox internal bridge (`vmbr0` or a dedicated
-vNIC). Only the `app` VM is reachable from the public internet; `db`
-listens only on its private IP.
-
-Replace placeholders before running anything: `api.example.com`,
-`10.0.0.20` (db private IP), `<DB_PASSWORD>`.
+**No inbound port is ever opened on your home router.** Both the API traffic
+and the deploy pipeline reach the rack over connections the rack itself dials
+out. That constraint is what shapes everything below.
 
 ---
 
-## 1. Postgres VM
+## 1. How it fits together
 
-```bash
-sudo apt update && sudo apt install -y postgresql postgresql-contrib
-sudo -u postgres psql <<SQL
-  CREATE USER weather WITH PASSWORD '<DB_PASSWORD>';
-  CREATE DATABASE weather_app OWNER weather;
-SQL
+```
+  ┌─────────┐   HTTPS   ┌──────────────┐            ┌──────────────────────────┐
+  │  Phone  │ ────────► │     VPS      │            │   Proxmox app VM (rack)  │
+  └─────────┘   :443    │              │            │                          │
+                        │   frps       │◄───────────┤  frpc   (dials OUT)      │
+                        │  (raw TCP,   │   tunnel   │    │                     │
+                        │   no certs)  │  :7000     │    ▼                     │
+                        └──────────────┘            │  caddy  (TLS terminates  │
+                                                    │    │     HERE — holds    │
+                                                    │    │     the only key)   │
+                                                    │    ▼                     │
+                                                    │  app    :3000            │
+                                                    │    │                     │
+                                                    │    ▼                     │
+                                                    │  db     Postgres 16      │
+                                                    └──────────────────────────┘
 ```
 
-Bind Postgres to the private interface only:
+The VPS relays **raw TCP**. It holds no certificate and no credentials, and it
+cannot read anything passing through it — if it is compromised, the attacker
+gets a relay, not your users' locations. TLS terminates on the rack. Do not
+"simplify" this by moving certificates to the VPS.
 
-```bash
-# /etc/postgresql/16/main/postgresql.conf
-listen_addresses = 'localhost,10.0.0.20'
+| Piece | Where | Why it exists |
+|---|---|---|
+| `frps` | VPS | Public :443. Relays bytes down the tunnel. |
+| `frpc` | rack | Dials out to the VPS. Removes the need for a port forward. |
+| `caddy` | rack | Terminates TLS, gets/renews Let's Encrypt certs. |
+| `app` | rack | Fastify API + node-cron alert engine. |
+| `db` | rack | Postgres 16, reachable only on the compose network. |
 
-# /etc/postgresql/16/main/pg_hba.conf — append:
-host    weather_app    weather    10.0.0.0/24    scram-sha-256
-```
+### VM sizing
 
-```bash
-sudo systemctl restart postgresql
-sudo ufw allow from 10.0.0.0/24 to any port 5432
-```
+| VM | vCPU | RAM | Disk |
+|---|---|---|---|
+| app (Proxmox) | 2 | 4 GB | 32 GB system + **separate 64 GB data disk** |
+| VPS | 1 | 1 GB | whatever the cheapest plan gives |
 
-Backups (cron on the db VM):
+The second virtual disk holds Postgres data and backups, so the database can be
+snapshotted in Proxmox independently of the OS disk and survives a rebuild of
+the VM. Mount it at `/srv/weatheralert` and set `DATA_DIR` to match.
 
-```cron
-# /etc/cron.d/weatheralert-pgdump
-0 */6 * * * postgres pg_dump -Fc weather_app | gzip > /var/backups/weather_app_$(date +\%Y\%m\%dT\%H\%M).sql.gz
-```
+4 GB is comfortable rather than required — CI builds the image, so the VM never
+runs `npm ci` or `tsc`. 2 GB would work; the headroom is for the self-hosted
+weather service you may add later.
 
-Ship `/var/backups/` to off-box storage on its own schedule (rsync to a
-Proxmox NAS share, or Proxmox Backup Server on the VM itself).
+### Before you start
+
+- A **domain** (~$12/yr). Not optional — the mobile app hardcodes this hostname
+  and you cannot change an IP after shipping a build without breaking every
+  installed copy.
+- A **VPS** with a static public IP (~€4/mo Hetzner, ~$5 Vultr/DO).
+- The **Firebase service-account JSON** (see `../../ACCOUNTS.md`).
+
+Replace throughout: `api.example.com`, `<VPS_IP>`, and every blank in `.env`.
 
 ---
 
-## 2. App VM — one-time bootstrap
+## 2. DNS
 
-Node 22, Nginx, Certbot, PM2:
+One record. No dynamic DNS needed — the VPS IP is static.
 
-```bash
-sudo apt update && sudo apt install -y curl git nginx
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-sudo apt install -y nodejs
-sudo npm install -g pm2
-sudo apt install -y certbot python3-certbot-nginx
+```
+A    api.example.com    <VPS_IP>
 ```
 
-Firewall:
+Wait for it to resolve before step 4, or Caddy's first certificate request will
+fail:
 
 ```bash
+dig +short api.example.com     # → <VPS_IP>
+```
+
+---
+
+## 3. The VPS
+
+```bash
+# Docker
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker "$USER" && newgrp docker
+
+# Firewall: only 443 (public) and 7000 (the rack's tunnel).
 sudo ufw allow OpenSSH
-sudo ufw allow 'Nginx Full'
+sudo ufw allow 443/tcp
+sudo ufw allow 7000/tcp
 sudo ufw enable
 ```
 
-Project layout:
+If your home IP is static, tighten 7000 to just it — nobody else ever needs it:
 
 ```bash
-sudo mkdir -p /opt/weatheralert /var/log/weatheralert
-sudo chown $USER:$USER /opt/weatheralert /var/log/weatheralert
+sudo ufw delete allow 7000/tcp
+sudo ufw allow from <YOUR_HOME_IP> to any port 7000 proto tcp
+```
+
+Copy the VPS config over from your workstation and start it:
+
+```bash
+scp -r server/deploy/vps youruser@<VPS_IP>:~/weatheralert-frps
+ssh youruser@<VPS_IP>
+cd ~/weatheralert-frps
+cp .env.example .env && chmod 600 .env
+# Fill in FRP_VERSION (from github.com/fatedier/frp/releases) and generate
+# the shared secret — you need this same value on the rack:
+openssl rand -hex 32
+nano .env
+docker compose up -d
+docker compose logs -f frps      # should show it listening on 7000
+```
+
+---
+
+## 4. The app VM
+
+```bash
+sudo apt update && sudo apt install -y curl git
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker "$USER" && newgrp docker
+
+# Outbound only — nothing here accepts connections from the internet.
+sudo ufw allow OpenSSH
+sudo ufw enable
+
+# Data disk for Postgres (adjust the device to match your Proxmox disk).
+sudo mkfs.ext4 /dev/sdb
+sudo mkdir -p /srv/weatheralert
+echo '/dev/sdb /srv/weatheralert ext4 defaults 0 2' | sudo tee -a /etc/fstab
+sudo mount -a
+
+sudo mkdir -p /opt/weatheralert && sudo chown "$USER:$USER" /opt/weatheralert
 git clone <REPO_URL> /opt/weatheralert
 ```
 
-Server `.env` (do not commit):
+Configuration — **one file** holds everything:
 
 ```bash
-cp /opt/weatheralert/server/.env.example /opt/weatheralert/server/.env
-# Edit with real secrets. DATABASE_URL points at the db VM:
-#   DATABASE_URL=postgresql://weather:<DB_PASSWORD>@10.0.0.20:5432/weather_app
-# Drop the Firebase service-account JSON next to the project and point
-# GOOGLE_APPLICATION_CREDENTIALS at its absolute path.
-#
-# Production must also set:
-#   NODE_ENV=production
-#   TRUST_PROXY=true      # Nginx sets X-Forwarded-For; without this every
-#                         # rate-limit bucket keys on the proxy's own IP.
-#   ENABLE_DEV_ROUTES     # leave unset/false — never true in production.
+cd /opt/weatheralert/server/deploy
+cp .env.example .env && chmod 600 .env
+nano .env        # every blank must be filled; see the comments in the file
+```
+
+The Firebase credentials go next to the server directory, where compose mounts
+them read-only into the container:
+
+```bash
+cp ~/firebase-service-account.json /opt/weatheralert/server/
+```
+
+> `DATABASE_URL` and `GOOGLE_APPLICATION_CREDENTIALS` are **not** yours to set —
+> compose derives them, because they must be container paths (`db`, not
+> `localhost`). Setting them in `.env` has no effect.
+
+---
+
+## 5. First deploy
+
+The image lives in a private GitHub Container Registry package, so log in once
+with a personal access token that has `read:packages`
+(github.com → Settings → Developer settings → Tokens):
+
+```bash
+echo <YOUR_PAT> | docker login ghcr.io -u <your-github-username> --password-stdin
+```
+
+Then:
+
+```bash
+cd /opt/weatheralert/server/deploy
+bash deploy.sh          # the same script CI runs
+```
+
+That pulls the image, applies migrations, starts all four containers, and
+health-checks the result. Verify:
+
+```bash
+docker compose -f docker-compose.prod.yml ps        # all Up / healthy
+curl -sS http://127.0.0.1:3000/health               # {"status":"ok"}
+curl -sS https://api.example.com/health             # from anywhere — the real test
+```
+
+The last one exercises the whole path: DNS → VPS → tunnel → Caddy → app. Caddy
+issues the certificate on the first HTTPS request, so give it a few seconds.
+
+Then check the public legal pages, which Caddy serves itself (they don't touch
+the app) with `OPERATOR_NAME` and `SUPPORT_EMAIL` filled in from `.env`:
+
+```bash
+curl -sS https://api.example.com/legal/privacy | grep -i mailto   # your SUPPORT_EMAIL
+```
+
+These three URLs — `/legal/privacy`, `/legal/terms`, `/legal/delete-account`
+— are what the Play Console listing, the Data safety form and the in-app
+paywall link to. They must stay up and stable once the app ships.
+
+Finally, point the client at it — `client/.env`:
+
+```
+EXPO_PUBLIC_API_URL=https://api.example.com
 ```
 
 ---
 
-## 3. App VM — first deploy
+## 6. Updates
+
+Once CI/CD is on (§7), **you don't do this** — push to `main` and it ships.
+
+Manually, if you ever need to:
 
 ```bash
-cd /opt/weatheralert/server
-npm ci
-npx prisma generate
-npx prisma migrate deploy
-npm run build
-pm2 start deploy/ecosystem.config.cjs
-pm2 save
-pm2 startup        # run the command pm2 prints (enables boot start)
-pm2 install pm2-logrotate
+cd /opt/weatheralert/server/deploy
+git -C /opt/weatheralert pull --ff-only
+bash deploy.sh
 ```
 
-Quick health check:
+**Rollback.** Every image is tagged with its commit SHA, so going back is
+pinning an older tag — no rebuild:
 
 ```bash
-curl -sS http://127.0.0.1:3000/health
-# → {"status":"ok"}
+cd /opt/weatheralert/server/deploy
+sed -i 's|^IMAGE_TAG=.*|IMAGE_TAG=<older-sha>|' .env
+docker compose -f docker-compose.prod.yml up -d app
 ```
+
+`deploy.sh` does this automatically if a deploy fails its health check.
+
+**Migrations are forward-only** and are *not* rolled back by any of the above.
+Take a Proxmox snapshot before any migration that isn't purely additive.
 
 ---
 
-## 4. Nginx + TLS
+## 7. CI/CD
 
-```bash
-sudo cp /opt/weatheralert/server/deploy/nginx/weatheralert.conf \
-        /etc/nginx/sites-available/weatheralert
-sudo sed -i 's/api\.example\.com/api.your-domain/g' \
-        /etc/nginx/sites-available/weatheralert
-sudo ln -s /etc/nginx/sites-available/weatheralert \
-           /etc/nginx/sites-enabled/weatheralert
-sudo nginx -t && sudo systemctl reload nginx
-```
+### What this is, in one paragraph
 
-Point DNS (or DDNS) at the rack's public IP and forward 443 → app VM on
-your router. Then:
-
-```bash
-sudo certbot --nginx -d api.your-domain
-```
-
-Certbot edits the site to inject `ssl_certificate` lines and installs a
-renewal timer. Verify:
-
-```bash
-curl -sS https://api.your-domain/health
-sudo systemctl list-timers | grep certbot
-```
-
----
-
-## 5. Updates (recurring) — automated via CI/CD
-
-Once the self-hosted runner is set up (§8), **deploys are automatic**: push
-to `main`, the server tests run on GitHub's cloud, and if they pass the
-`deploy` job runs on the rack and ships the change. You don't SSH in for a
-normal release.
-
-What the pipeline does on the VM is exactly the manual sequence below,
-wrapped in `server/deploy/deploy.sh` (sync to `origin/main` → `npm ci` →
-`prisma migrate deploy` → `npm run build` → `pm2 startOrReload` → health
-check). See `.github/workflows/ci.yml`, the `deploy` job.
-
-Manual deploy (fallback — first release, or deploying without CI):
-
-```bash
-cd /opt/weatheralert/server
-bash deploy/deploy.sh          # same script the pipeline runs
-```
-
-Or the individual steps:
-
-```bash
-cd /opt/weatheralert
-git pull --ff-only
-cd server
-npm ci
-npx prisma migrate deploy
-npm run build
-pm2 reload weatheralert-api
-```
-
-`pm2 reload` triggers SIGTERM, which `src/index.ts` handles by stopping
-the cron, closing Fastify, and disconnecting Prisma before exiting.
-
-Take a Proxmox snapshot of the app VM **before** any migration that's not
-purely additive — easy rollback if the deploy goes sideways. `deploy.sh`
-runs `prisma migrate deploy`, which is forward-only, but a bad migration is
-still easiest to undo from a snapshot.
-
----
-
-## 6. Operational checks
-
-- Logs: `pm2 logs weatheralert-api` (live), `/var/log/weatheralert/*.log`
-  (persisted, rotated by `pm2-logrotate`).
-- Status: `pm2 status` and `pm2 monit`.
-- Nginx access/error: `/var/log/nginx/`.
-- DB connectivity from app VM: `psql "$DATABASE_URL" -c 'select 1'`.
-- Alert engine heartbeat: grep `pm2 logs` for the cron tick (every two
-  minutes); silent → check `ALERT_ENGINE_CRON` + Postgres reachability.
-
----
-
-## 7. Optional: containerized path
-
-The `server/Dockerfile` produces a runnable image if you'd rather run
-under Docker on the app VM than under PM2.
-
-```bash
-# Build on the app VM (or push from CI).
-docker build -t weatheralert-api:latest .
-
-# Run, mounting .env and the Firebase service account.
-docker run -d \
-  --name weatheralert-api \
-  --restart unless-stopped \
-  -p 127.0.0.1:3000:3000 \
-  --env-file /opt/weatheralert/server/.env \
-  -v /opt/weatheralert/server/firebase-service-account.json:/app/firebase-service-account.json:ro \
-  weatheralert-api:latest
-
-# Migrations are not run on container start; do them out-of-band:
-docker run --rm --env-file /opt/weatheralert/server/.env \
-  weatheralert-api:latest npx prisma migrate deploy
-```
-
-The Nginx config is unchanged — it still proxies to `127.0.0.1:3000`. PM2
-is not needed in this mode.
-
-The container path is a fallback; PM2 is the canonical deploy for this
-project (see spec §7).
-
----
-
-## 8. CI/CD — self-hosted GitHub Actions runner
-
-This is what makes `git push` to `main` deploy automatically. Read this once;
-it's the only new piece beyond the manual runbook above.
+"CI" runs your tests automatically whenever you push. "CD" ships the result if
+they pass. Together: you `git push`, GitHub runs the test suite on its own
+machines, builds a Docker image, and your rack pulls and restarts — with no
+manual step and no way to ship a red build.
 
 ### Why a self-hosted runner
 
-GitHub runs your **tests** on its own cloud machines. To **deploy**, something
-has to run commands on *this* VM. Our home rack sits behind a router that
-blocks incoming connections (and may be behind CGNAT with no public address),
-so we don't let GitHub connect *in*. Instead we install a small GitHub program
-— the *runner* — on the app VM. It connects **outbound** to GitHub and waits
-for jobs. When the `deploy` job fires, GitHub hands it to this runner, which is
-already inside the network. No port-forwarding, no public IP, no SSH keys
-stored in GitHub — that's the whole point of this choice.
+GitHub runs tests on its own cloud machines. But to *deploy*, something has to
+run commands on **your** VM, and GitHub can't reach into your network — that's
+the whole premise of this setup. So you install a small GitHub program (the
+*runner*) on the app VM. It connects **outbound** to GitHub and waits for work.
+When the `deploy` job fires, GitHub hands it to that runner, which is already
+inside your network. Same trick as the frp tunnel: nothing dials in.
 
-### Install (one time, on the app VM)
+### The four jobs
 
-Run the runner as the **same user** that owns `/opt/weatheralert` (so it can
-write the app dir and control PM2) — not root.
+`.github/workflows/ci.yml`:
 
-1. In GitHub: **repo → Settings → Actions → Runners → New self-hosted runner
-   → Linux / x64.** That page shows a download block and a `./config.sh`
-   command with a one-time registration **token** baked in. Use *those* exact
-   lines (the token rotates); the steps below are the shape of it:
+| Job | Runs on | When | Does |
+|---|---|---|---|
+| `server` | GitHub cloud | every push + PR | Postgres service container, migrations, drift check, typecheck, tests |
+| `client` | GitHub cloud | every push + PR | typecheck, lint, jest |
+| `image` | GitHub cloud | push to `main`, after `server` passes | builds the Docker image, pushes to GHCR tagged with the commit SHA |
+| `deploy` | **your app VM** | after `image` succeeds | pulls that exact tag, migrates, restarts, health-checks |
+
+A red test suite or a PR never reaches `deploy`. Note `client` is **not** a
+gate — a failing client check won't block a server deploy.
+
+### Install the runner (one time, on the app VM)
+
+Run it as the **same user** that owns `/opt/weatheralert` — not root.
+
+1. GitHub: **repo → Settings → Actions → Runners → New self-hosted runner →
+   Linux / x64.** That page shows a download block and a `./config.sh` line
+   with a one-time token baked in. Use *those* exact lines — the token rotates.
 
    ```bash
    mkdir -p ~/actions-runner && cd ~/actions-runner
-   # (copy the exact curl URL + tar line from the GitHub page)
    curl -o actions-runner.tar.gz -L <URL_FROM_GITHUB>
    tar xzf actions-runner.tar.gz
    ./config.sh --url https://github.com/<owner>/<repo> --token <TOKEN_FROM_GITHUB>
-   # Accept the defaults; the default label "self-hosted" is what ci.yml targets.
+   # Accept the defaults; the "self-hosted" label is what ci.yml targets.
    ```
 
-2. Install it as a **service** so it starts on boot and keeps running after you
-   log out:
+2. Install as a service so it survives reboots and logout:
 
    ```bash
-   sudo ./svc.sh install $USER
+   sudo ./svc.sh install "$USER"
    sudo ./svc.sh start
-   sudo ./svc.sh status      # should say "active (running)"
+   sudo ./svc.sh status        # "active (running)"
    ```
 
-3. Confirm it registered: the runner shows up as **Idle** under
-   Settings → Actions → Runners.
+3. Confirm it shows as **Idle** under Settings → Actions → Runners.
 
-### Make sure the runner can find the tools
+The runner user must be in the `docker` group — the deploy job runs `docker
+compose`. You did this in §4; verify with `docker ps` as that user.
 
-The `deploy` job calls `git`, `npm`, `node`, `pm2`, and `curl`. These are on
-your PATH in an interactive shell, but a **service** may start with a leaner
-environment. After the first deploy, if a step fails with "command not found":
+### Turn the pipeline on
 
-- Confirm the tools exist for the runner user: `which node npm pm2 git curl`.
-- `pm2` is a global npm install; ensure the npm global bin dir is on PATH for
-  the service (e.g. add it in `~/actions-runner/.env` as `PATH=...`, then
-  `sudo ./svc.sh stop && sudo ./svc.sh start`).
-
-### How it ties together
-
-- `.github/workflows/ci.yml` has three jobs: `server` and `client` (tests, on
-  GitHub's cloud) and `deploy` (on this runner).
-- `deploy` has `needs: server` and an `if:` guard, so it runs **only** when the
-  server tests pass **and** the push is to `main`. PRs and red builds never
-  deploy.
-- `deploy` runs `server/deploy/deploy.sh` with `DEPLOY_DIR=/opt/weatheralert`.
-  That script does the §5 sequence and ends with a health check; if the app
-  isn't healthy the job goes red.
-
-### Turning the pipeline on
-
-The `deploy` job has a master on-switch so it stays dormant until the rack is
-ready: it only runs when the repo variable **`DEPLOY_ENABLED`** is `true`.
-Until then GitHub *skips* the job (it won't sit queued waiting for a runner
-that doesn't exist yet). When you're ready:
+`image` and `deploy` stay dormant until a repo variable says otherwise, so they
+don't sit queued before the runner exists.
 
 **repo → Settings → Secrets and variables → Actions → Variables → New
 repository variable**, name `DEPLOY_ENABLED`, value `true`.
 
-To pause automated deploys later (e.g. during maintenance), set it back to
-`false` or delete it.
+Set it back to `false` to pause automated deploys.
 
-### First-time ordering
+### Order of operations
 
-1. Provision the VMs and do the manual **first deploy** (§3) once, so PM2
-   knows the app and `.env` / Firebase creds are in place.
-2. Install the runner (this section, above).
+1. §3–5 above — VPS, VM, first deploy by hand.
+2. Install the runner.
 3. Set `DEPLOY_ENABLED=true`.
-
-After that, pushes to `main` deploy on their own.
+4. Merge to `main`. It deploys itself from here on.
 
 ### Security notes
 
-- A self-hosted runner executes whatever the workflow says — keep the repo
-  **private** and be careful merging untrusted PRs (their workflow changes
-  would run on your rack).
-- The runner needs no inbound firewall rule. Keep `ufw` as in §2; outbound
-  HTTPS to GitHub is all it uses.
-- To retire a runner: `sudo ./svc.sh stop && sudo ./svc.sh uninstall`, then
-  remove it from the GitHub Runners page.
+- A self-hosted runner executes whatever a workflow says. **Keep the repo
+  private** and be careful merging untrusted PRs — a PR that edits `ci.yml`
+  would run on your rack.
+- No inbound firewall rule, no SSH key in GitHub, no registry password stored
+  on the VM (the deploy job logs in with an ephemeral token and logs out after).
+- If a runner service step fails with "command not found", the service has a
+  leaner PATH than your shell. Add what's missing to `~/actions-runner/.env`,
+  then `sudo ./svc.sh stop && sudo ./svc.sh start`.
+
+---
+
+## 8. Backups
+
+Postgres runs in a container, but its data is a plain directory on the data
+disk, so this is ordinary `pg_dump`. On the app VM:
+
+```cron
+# /etc/cron.d/weatheralert-pgdump
+0 */6 * * * root docker exec weatheralert-db-1 pg_dump -U weather -Fc weather_app | gzip > /srv/weatheralert/backups/weather_app_$(date +\%Y\%m\%dT\%H\%M).sql.gz
+
+# Retention — without this the backups grow without bound.
+30 4 * * * root find /srv/weatheralert/backups -name 'weather_app_*.sql.gz' -mtime +14 -delete
+```
+
+```bash
+sudo mkdir -p /srv/weatheralert/backups
+```
+
+Ship that directory off-box on its own schedule (rsync to a NAS share, or point
+Proxmox Backup Server at the VM).
+
+Restore:
+
+```bash
+gunzip -c /srv/weatheralert/backups/<file>.sql.gz \
+  | docker exec -i weatheralert-db-1 pg_restore -U weather -d weather_app --clean
+```
+
+---
+
+## 9. Operations
+
+```bash
+cd /opt/weatheralert/server/deploy
+alias dc='docker compose -f docker-compose.prod.yml'
+
+dc ps                       # what's up, and health status
+dc logs -f app              # API + alert engine
+dc logs -f caddy            # TLS / certificate issues
+dc logs -f frpc             # tunnel health
+dc exec db psql -U weather weather_app -c 'select 1'
+```
+
+- **Alert engine heartbeat**: `dc logs app | grep alert-engine` — a tick every
+  two minutes. Silent means check `ALERT_ENGINE_CRON` and DB reachability.
+- **Log rotation** is Docker's job, not pm2-logrotate's. If logs grow, set
+  `log-driver`/`log-opts` in `/etc/docker/daemon.json`.
+
+### Troubleshooting
+
+| Symptom | Look at |
+|---|---|
+| `https://api.example.com` times out | `dc logs frpc` and, on the VPS, `docker compose logs frps`. Is the tunnel connected? |
+| TLS error / cert never issued | `dc logs caddy`. Does DNS resolve to the VPS? Is VPS :443 open? Certs need TLS-ALPN-01 to reach Caddy. |
+| Every user shares one rate-limit bucket | PROXY protocol mismatch. `frpc.toml`'s `proxyProtocolVersion` and the Caddyfile's `proxy_protocol` wrapper must both be present. |
+| `deploy.sh` fails on pull | GHCR login expired on the VM, or the package is private and the token lacks `read:packages`. |
+| App restarts in a loop | `dc logs app` — usually a missing `.env` value; `config.ts` throws on required vars. |
+
+---
+
+## 10. The old PM2 path
+
+`ecosystem.config.cjs` and `nginx/` are kept as a fallback for running the
+server natively without Docker. They are no longer what CI ships, and the
+Nginx config assumes an inbound port forward, which this setup does not use.
