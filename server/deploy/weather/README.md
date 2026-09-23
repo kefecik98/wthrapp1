@@ -70,6 +70,24 @@ sudo chown -R "$USER:$USER" /srv/pirate-weather
 
 `vnstat` starts counting traffic now — you'll want a week of numbers (step 9).
 
+Move SSH to port 432. Ubuntu 24.04 starts sshd from systemd's
+`ssh.socket`, so the port only changes after a daemon reload. Keep your
+session open, confirm a new login on 432 works, then close 22:
+
+```bash
+echo 'Port 432' | sudo tee /etc/ssh/sshd_config.d/10-port.conf
+sudo sshd -t && sudo systemctl daemon-reload && \
+  { systemctl is-active --quiet ssh.socket && sudo systemctl restart ssh.socket || sudo systemctl restart ssh; }
+sudo ss -tlnp | grep sshd        # only :432
+```
+
+For Claude Code access from a workstation: a dedicated `claude` user in the
+`docker` group (no password, no sudo), whose `authorized_keys` entry is
+restricted with `from="<workstation IP>",no-agent-forwarding,no-port-forwarding,no-X11-forwarding`.
+Being in the `docker` group is root-equivalent on this VM — acceptable only
+because the VM is dedicated and holds no user data. Never do the same on the
+app VM.
+
 ## 3. Get Pirate Weather, pinned
 
 Always a tagged release, never `main`. v0.7.2 is what this runbook was
@@ -153,7 +171,7 @@ Docker publishes ports by writing its own iptables rules, which bypass
 | Direction | Source | Port | Why |
 |---|---|---|---|
 | IN | `<APP_IP>` | tcp 8083 | the app VM's forecast requests — nothing else |
-| IN | your admin machine | tcp 22 | SSH |
+| IN | your admin machine(s) | tcp 432 | SSH (moved off 22 — see step 2) |
 | OUT | any | any | model downloads (NOAA/ECMWF buckets over HTTPS) |
 
 Nothing else inbound. There is no port forward and no internet exposure.
