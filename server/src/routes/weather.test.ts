@@ -1,5 +1,5 @@
-// Integration tests for GET /weather. fetchMinutely (Tomorrow.io) is
-// mocked so tests never make a real HTTP request.
+// Integration tests for GET /weather. The weather provider is faked
+// (test/fakeProvider) so tests never make a real HTTP request.
 
 import { FastifyInstance } from "fastify";
 import {
@@ -12,22 +12,16 @@ import {
   vi,
 } from "vitest";
 
-vi.mock("../services/weather", async () => {
-  const real = await vi.importActual<typeof import("../services/weather")>(
-    "../services/weather",
-  );
-  return {
-    ...real,
-    fetchMinutely: vi.fn(),
-  };
-});
+vi.mock("../services/providers", async () =>
+  (await import("../test/fakeProvider")).providersMock,
+);
 
 import { prisma } from "../db";
 import { bearer, buildTestApp, resetDb } from "../test/helpers";
-import { fetchMinutely } from "../services/weather";
+import { fakeFetch } from "../test/fakeProvider";
 import { clearForecastCache } from "../services/forecastCache";
 
-const mockFetch = vi.mocked(fetchMinutely);
+const mockFetch = fakeFetch;
 
 let app: FastifyInstance;
 

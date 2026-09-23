@@ -349,13 +349,19 @@ Upsert subscriptions table:
   EXPIRATION                 → status = 'expired'
 ```
 
-### 6.5 Tomorrow.io Query Structure
+### 6.5 Forecast Data Shape
 
-Tomorrow.io's `/timelines` endpoint (or the newer `/weather/forecast` endpoint) with `minutely` timestep returns precipitation data for the next 60 minutes.
+Forecasts come from a weather provider behind the `WeatherProvider`
+interface (`server/src/services/providers/`), chosen by `WEATHER_PROVIDER`.
+Tomorrow.io (`/timelines`, 1-minute timestep, next 60 minutes) is the launch
+provider; Pirate Weather is being evaluated (see TODO.md). Every adapter
+converts its response into `ForecastMinute`, which is also what `GET /weather`
+sends to the app — so this shape is a contract with installed app builds.
+Its field names and codes come from Tomorrow.io, the first provider.
 
 ```typescript
-// Relevant fields from Tomorrow.io minutely response
-interface TomorrowMinute {
+// Provider-neutral minute (server/src/services/weather.ts)
+interface ForecastMinute {
   time: string;                // ISO timestamp
   values: {
     precipitationIntensity: number;   // mm/hr
@@ -370,7 +376,7 @@ interface TomorrowMinute {
 Threshold logic per user preference:
 
 ```typescript
-function findNextEvent(minutes: TomorrowMinute[], prefs: UserPreferences) {
+function findNextEvent(minutes: ForecastMinute[], prefs: UserPreferences) {
   for (const minute of minutes) {
     const v = minute.values;
     const minsAway = (new Date(minute.time).getTime() - Date.now()) / 60000;

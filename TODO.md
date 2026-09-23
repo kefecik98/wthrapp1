@@ -440,9 +440,14 @@ Plan:
 - [ ] (DECISION) Where are the launch users? US → HRRR makes this
       plausible. Elsewhere → expect worse minutely accuracy; shadow-test
       before believing otherwise.
-- [ ] Provider seam: neutral `ForecastMinute` type, `WEATHER_PROVIDER`
-      config, Pirate Weather adapter + fixture tests (hosted API key is
-      enough to build against).
+- [x] Provider seam (branch `weather-provider-seam`): `WeatherProvider`
+      interface + registry in `server/src/services/providers/`, Tomorrow.io
+      moved behind it, `TomorrowMinute` → `ForecastMinute` (same wire
+      shape), `WEATHER_PROVIDER` config (validated at startup), cache keys
+      scoped by provider name. No behaviour change.
+- [ ] Pirate Weather adapter + fixture tests (hosted API key is enough to
+      build against). Make `TOMORROW_API_KEY` required only when Tomorrow.io
+      is the live or shadow provider.
 - [ ] Shadow mode: the engine also evaluates the second provider and logs
       disagreements (would-alert / wouldn't, and start-time delta) without
       sending. Run 2–4 weeks covering real precipitation events.

@@ -23,7 +23,11 @@ You are an experienced backend developer working on the backend for the WeatherA
 - **Dev-only routes fail closed.** They register on a positive
   `ENABLE_DEV_ROUTES=true`, not on `NODE_ENV !== "production"`, so a missing
   or misspelled `NODE_ENV` cannot expose them.
-- **All Tomorrow.io reads go through `services/forecastCache.getMinutely`,**
-  never `fetchMinutely` directly. The cache is grid-keyed and shared between
-  the alert engine and `GET /weather`; calling the fetcher directly bypasses
-  it and costs a billable call.
+- **All forecast reads go through `services/forecastCache.getMinutely`,**
+  never a provider adapter (`services/providers/*`) directly. The cache is
+  grid-keyed and shared between the alert engine and `GET /weather`; calling
+  an adapter directly bypasses it and costs a billable call.
+- **`ForecastMinute` is a wire contract.** Provider adapters convert into it,
+  and `GET /weather` sends it to installed apps unchanged. Never change its
+  fields, units or `precipitationType` codes to suit a new provider — convert
+  in the adapter instead.

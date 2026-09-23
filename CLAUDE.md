@@ -70,18 +70,18 @@ Both projects require Node 22 and have `.env.example` files that must be copied 
 
 The client and server cooperate to deliver one thing: a push notification fired *before* a weather event reaches the user's GPS location.
 
-1. **Client** (`client/`) reports GPS via `expo-location` (foreground poll + background significant-change task in `src/services/location.ts`) to `PUT /location`, and registers its FCM push token via `PUT /device/token`. Auth is JWT access + refresh, persisted to `expo-secure-store`; the `Authorization: Bearer ...` header is added by the `src/lib/api.ts` fetch wrapper, which also retries once on 401 by hitting `POST /auth/refresh`. Server data is fetched through `@tanstack/react-query`; session state lives in a Zustand store. Routing is `expo-router` with an auth gate in `app/_layout.tsx` (Stack.Protected → tabs vs. login).
+1. **Client** (`client/`) reads GPS via `expo-location` (foreground poll + background significant-change task in `src/services/location.ts`), snaps each fix to its ~3 km grid cell on the phone, and reports only the cell centre to `PUT /location`, and registers its FCM push token via `PUT /device/token`. Auth is JWT access + refresh, persisted to `expo-secure-store`; the `Authorization: Bearer ...` header is added by the `src/lib/api.ts` fetch wrapper, which also retries once on 401 by hitting `POST /auth/refresh`. Server data is fetched through `@tanstack/react-query`; session state lives in a Zustand store. Routing is `expo-router` with an auth gate in `app/_layout.tsx` (Stack.Protected → tabs vs. login).
 
 2. **Server** (`server/`) is a single Fastify process. Routes under `src/routes/` cover auth (email/password + Apple + Google), location, weather, preferences, device token, the RevenueCat webhook, and dev-only seed routes. The same process runs the alert engine via `node-cron` (`src/engine/alertEngine.ts`).
 
 3. **Alert engine** (spec §6.3) every ~2 minutes:
    - selects users that are subscribed (`active`/`trial`), have notifications on, a fresh location, and an FCM token,
-   - clusters them into ~0.1° lat/lng grid cells so it makes one Tomorrow.io call per cell instead of per user,
+   - clusters them into forecast cells (`FORECAST_CELL_DEG`, default 0.1°) so it makes one weather-provider call per cell instead of per user,
    - runs `findNextEvent` (in `src/services/weather.ts`) against each user's enabled event types + intensity thresholds + lead time,
    - dedupes by inserting into `alert_log` — the `UNIQUE (user_id, event_type, event_start_at)` constraint *is* the dedup; a duplicate insert throws and the alert is silently skipped,
    - sends the FCM push via `src/services/push.ts`.
 
-   Resilience invariants (keep these intact): a slow tick can't pile up — `startAlertEngine` skips a cron tick if the previous cycle is still running (direct callers like tests are intentionally unguarded). Both external calls are time-bounded so one hang can't stall a cycle: the Tomorrow.io fetch via `config.tomorrow.timeoutMs` (`TOMORROW_TIMEOUT_MS`), and each FCM send via an internal 10s cap in `push.ts`.
+   Resilience invariants (keep these intact): a slow tick can't pile up — `startAlertEngine` skips a cron tick if the previous cycle is still running (direct callers like tests are intentionally unguarded). Both external calls are time-bounded so one hang can't stall a cycle: the weather-provider fetch (Tomorrow.io: `config.tomorrow.timeoutMs` / `TOMORROW_TIMEOUT_MS`; every adapter must bound its own call), and each FCM send via an internal 10s cap in `push.ts`.
 
 4. **Social auth**: Apple and Google identity tokens are verified server-side (`src/services/appleAuth.ts` via JWKS, `src/services/googleAuth.ts` via `google-auth-library`). Accounts resolve by the stable `(provider, provider_sub)` key with an email-link fallback, so Apple private-relay addresses are handled. `users.password_hash` is nullable for social-only accounts.
 
@@ -104,7 +104,9 @@ Full runbook: `server/deploy/DEPLOY.md`. The shape of it:
 - No native build steps in dependencies: `bcryptjs` (not `bcrypt`), built-in `fetch` (no axios).
 - The `prisma` CLI is a **production** dependency on purpose. The runtime image installs with `--omit=dev`, and deploys run `prisma migrate deploy` as a one-shot container from that same image — moving it back to devDependencies breaks migrations in production.
 - Dev-only routes in `src/routes/dev.ts` are registered only when `ENABLE_DEV_ROUTES=true` (a positive opt-in, so a missing/typo'd `NODE_ENV` can't expose them).
-- Every Tomorrow.io read goes through `src/services/forecastCache.ts` (`getMinutely`), never `fetchMinutely` directly — the grid-cell cache is shared by the alert engine and `GET /weather`, and its TTL is what bounds API spend.
+- Every forecast read goes through `src/services/forecastCache.ts` (`getMinutely`), never a provider adapter directly — the grid-cell cache is shared by the alert engine and `GET /weather`, and its TTL is what bounds API spend.
+- Weather providers sit behind the `WeatherProvider` interface in `src/services/providers/` (Tomorrow.io today), selected by `WEATHER_PROVIDER`. Adapters must emit `ForecastMinute` exactly (`src/services/weather.ts`): `GET /weather` sends it to the app unchanged, so its fields, units and precipitation codes are a contract with installed app builds.
+- User location is only ever a 0.03° grid-cell centre (`src/lib/grid.ts`, mirrored in `client/src/lib/grid.ts` — keep the two identical). Never store or forward an exact position.
 - Tests are vitest; the build uses `tsconfig.build.json` to exclude test files.
 
 ## Client-specific conventions

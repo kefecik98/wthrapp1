@@ -1,25 +1,26 @@
 // Unit tests for the cross-cycle forecast cache. Pure logic — no database,
-// and fetchMinutely (Tomorrow.io) is mocked so nothing hits the network.
+// and the weather provider is faked (test/fakeProvider) so nothing hits the
+// network.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("./weather", async () => {
-  const real = await vi.importActual<typeof import("./weather")>("./weather");
-  return { ...real, fetchMinutely: vi.fn() };
-});
+vi.mock("./providers", async () =>
+  (await import("../test/fakeProvider")).providersMock,
+);
 
 import { config } from "../config";
-import { fetchMinutely, TomorrowMinute } from "./weather";
+import { fakeFetch } from "../test/fakeProvider";
+import type { ForecastMinute } from "./weather";
 import {
   clearForecastCache,
   forecastCacheSize,
   getMinutely,
 } from "./forecastCache";
 
-const mockFetch = vi.mocked(fetchMinutely);
+const mockFetch = fakeFetch;
 
 /** Minimal forecast payload; contents don't matter to the cache. */
-function minutes(label: string): TomorrowMinute[] {
+function minutes(label: string): ForecastMinute[] {
   return [
     {
       time: new Date(Date.now() + 60_000).toISOString(),
@@ -113,9 +114,9 @@ describe("getMinutely", () => {
   });
 
   it("collapses concurrent calls for the same cell into one fetch", async () => {
-    let resolveFetch: (v: TomorrowMinute[]) => void = () => {};
+    let resolveFetch: (v: ForecastMinute[]) => void = () => {};
     mockFetch.mockReturnValue(
-      new Promise<TomorrowMinute[]>((r) => {
+      new Promise<ForecastMinute[]>((r) => {
         resolveFetch = r;
       }),
     );

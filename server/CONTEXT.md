@@ -43,7 +43,10 @@ src/
     webhooks.ts        POST /webhooks/revenuecat (shared-secret verified)
     dev.ts             POST /dev/seed-subscription (auth — DEV ONLY)
   services/
-    weather.ts         Tomorrow.io client + findNextEvent threshold logic
+    weather.ts         ForecastMinute (wire format) + findNextEvent matching
+    forecastCache.ts   grid-cell cache in front of the live provider
+    providers/         WeatherProvider interface + registry (WEATHER_PROVIDER)
+      tomorrow.ts      Tomorrow.io adapter
     push.ts            lazy FCM init + sendPush
     appleAuth.ts       verify Apple identity token (JWKS)
     googleAuth.ts      verify Google id_token (google-auth-library)

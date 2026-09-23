@@ -3,7 +3,7 @@
 // What this verifies (spec §6.3):
 // - Only subscribed users with notifications on, a fresh location, and an
 //   FCM token are considered.
-// - Users in the same ~0.1° grid cell share one Tomorrow.io forecast call.
+// - Users in the same forecast cell share one provider call.
 // - findNextEvent matches against each user's enabled events + lead time.
 // - The `alert_log` UNIQUE (user_id, event_type, event_start_at) constraint
 //   prevents a repeat alert when the cycle runs again with the same forecast.
@@ -19,27 +19,26 @@ import {
   vi,
 } from "vitest";
 
-// Mock the network-bound pieces. Keep findNextEvent real — its pure
-// behaviour is already covered by services/weather.test.ts, but the engine
-// composes it and we want the composition exercised here.
-vi.mock("../services/weather", async () => {
-  const real = await vi.importActual<typeof import("../services/weather")>(
-    "../services/weather",
-  );
-  return { ...real, fetchMinutely: vi.fn() };
-});
+// Mock the network-bound pieces: the weather provider (see
+// test/fakeProvider) and push. findNextEvent stays real — its pure
+// behaviour is covered by services/weather.test.ts, but the engine composes
+// it and we want the composition exercised here.
+vi.mock("../services/providers", async () =>
+  (await import("../test/fakeProvider")).providersMock,
+);
 vi.mock("../services/push", () => ({
   sendPush: vi.fn(),
 }));
 
 import { prisma } from "../db";
 import { runAlertCycle } from "./alertEngine";
-import { fetchMinutely, TomorrowMinute } from "../services/weather";
+import type { ForecastMinute } from "../services/weather";
+import { fakeFetch } from "../test/fakeProvider";
 import { clearForecastCache } from "../services/forecastCache";
 import { sendPush } from "../services/push";
 import { resetDb } from "../test/helpers";
 
-const mockFetch = vi.mocked(fetchMinutely);
+const mockFetch = fakeFetch;
 const mockSend = vi.mocked(sendPush);
 
 beforeAll(async () => {
@@ -100,7 +99,7 @@ async function seedUser(u: SeedUser) {
 }
 
 /** Build a forecast where rain starts `offsetMin` minutes from now. */
-function rainForecast(offsetMin: number): TomorrowMinute[] {
+function rainForecast(offsetMin: number): ForecastMinute[] {
   return [
     {
       time: new Date(Date.now() + offsetMin * 60_000).toISOString(),
@@ -255,7 +254,7 @@ describe("runAlertCycle", () => {
 
 describe("runAlertCycle (free tier)", () => {
   /** A forecast where snow (not rain) starts `offsetMin` minutes from now. */
-  function snowForecast(offsetMin: number): TomorrowMinute[] {
+  function snowForecast(offsetMin: number): ForecastMinute[] {
     return [
       {
         time: new Date(Date.now() + offsetMin * 60_000).toISOString(),
