@@ -372,6 +372,77 @@ a small beta — about 3 continuously-active cells, more if you raise the TTL.
 Move to a paid Tomorrow.io tier only once real concurrent users span more
 cells than that. Re-measure against real usage before committing to a plan.
 
+### Pirate Weather migration — evaluation (2026-09-23)
+
+Question: replace Tomorrow.io with a self-hosted Pirate Weather instance on
+the rack. **Recommendation: launch on Tomorrow.io; build a provider seam and
+shadow-test Pirate Weather now; switch only if the shadow numbers hold up in
+the region the users actually live in.**
+
+Facts (from the Pirate Weather docs/changelog, Sept 2026):
+- Open source since v2.4 (Nov 2024), **AGPL-3.0**, x64 + ARM images since
+  v2.6. Dark Sky-compatible JSON: `GET /forecast/<key>/<lat>,<lng>`.
+- Self-hosting: ingest needs **≥32 GB *free* RAM and ≥200 GB working disk**;
+  the response container ~50 GB. First start ≈ 1 h to pull model runs. That
+  is a new, dedicated Proxmox VM — not the 4 GB app VM. It only dials out
+  (to NOAA/ECMWF open-data buckets), so the no-inbound rule holds.
+- Minutely = **model output, not a radar nowcast**: HRRR sub-hourly (3 km,
+  15-min steps, *continental US only*) interpolated to 1-minute; elsewhere
+  it falls back to coarser hourly models (GFS/ECMWF/DWD MOSMIX, Canadian
+  models for Canada). Outside the US, "rain in 12 minutes" becomes an
+  interpolation of hourly data — a real downgrade for this product.
+- Minutely block has only precip intensity/probability/type. Wind and CAPE
+  are hourly. There is no thunderstorm probability and no hail type.
+- Hosted Pirate Weather API is an in-between option: free 20k calls/month
+  (~4–5 always-active cells at 144 calls/day/cell), but it sees
+  coordinates like Tomorrow.io does.
+
+What migration costs in code (small — the seam already exists):
+- `fetchMinutely` in `server/src/services/weather.ts` is the only provider
+  call; `forecastCache`, the engine and `GET /weather` all consume its
+  output. Add a `WEATHER_PROVIDER` switch and a Pirate Weather adapter.
+- **The adapter must emit today's shape** (`time` ISO, numeric
+  `precipitationType`, `precipitationProbability` 0–100, mm/hr). `GET
+  /weather` passes minutes straight to the client, which reads those
+  numeric codes — shipped app builds can't be changed, so the shape is a
+  contract. Mapping: unix `time` → ISO; `precipType` rain→1, snow→2,
+  ice→3, sleet→4; probability ×100; `windSpeed` from the matching hourly
+  entry; thunder from hourly CAPE (Pirate Weather's own threshold is
+  ≥2500 J/kg) instead of `thunderstormProbability`.
+- Product side-effects: thunder alerts become a CAPE heuristic at hourly
+  resolution; "hail" is already really ice pellets on Tomorrow.io and
+  becomes sleet. Update the paywall/preferences copy if either is
+  noticeably worse.
+- Once self-hosted, calls are free, so `FORECAST_CACHE_TTL_MS` is bounded
+  by model update cadence, not spend.
+
+Gains: no per-call bill; coordinates never leave the rack (Tomorrow.io
+drops out of the privacy policy — consistent with the reason Cloudflare
+Tunnel was rejected); no vendor rate limits.
+
+Obligations/risks: AGPL — run it unmodified, or publish any modifications
+(get a proper read if you change it). ECMWF open data is CC-BY-4.0 and DWD
+needs a source credit — add an in-app/`/legal` attribution. The rack
+becomes a single point of failure for *data* as well as the API, and ingest
+bandwidth is unmeasured — measure it for a week before committing.
+
+Plan:
+- [ ] (DECISION) Where are the launch users? US → HRRR makes this
+      plausible. Elsewhere → expect worse minutely accuracy; shadow-test
+      before believing otherwise.
+- [ ] Provider seam: neutral `ForecastMinute` type, `WEATHER_PROVIDER`
+      config, Pirate Weather adapter + fixture tests (hosted API key is
+      enough to build against).
+- [ ] Shadow mode: the engine also evaluates the second provider and logs
+      disagreements (would-alert / wouldn't, and start-time delta) without
+      sending. Run 2–4 weeks covering real precipitation events.
+- [ ] If it holds up: stand up the weather VM (≥8 vCPU suggested, ≥40 GB
+      RAM, ≥300 GB NVMe), point the adapter at it over the LAN, shadow
+      briefly against hosted, then flip `WEATHER_PROVIDER`. Keep the
+      Tomorrow.io adapter as a config-flip rollback.
+- [ ] After the switch: privacy policy (drop Tomorrow.io), data
+      attribution, `ACCOUNTS.md`, spec §6.5.
+
 ---
 
 ## Done
