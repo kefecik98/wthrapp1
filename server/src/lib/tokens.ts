@@ -7,6 +7,7 @@ import { config } from "../config";
 
 export interface TokenPayload {
   sub: string; // user id
+  tv: number; // token version — must match the user's current tokenVersion
 }
 
 export interface TokenPair {
@@ -14,14 +15,22 @@ export interface TokenPair {
   refreshToken: string;
 }
 
-export function signTokenPair(userId: string): TokenPair {
-  const payload: TokenPayload = { sub: userId };
+// Pin the signing algorithm on both sides. Without `algorithms` on verify,
+// jsonwebtoken accepts any algorithm the token header names, which is the
+// classic confusion attack (e.g. a token that claims a different HMAC or an
+// asymmetric alg). The social verifiers already pin RS256.
+const ALGORITHM = "HS256" as const;
+
+export function signTokenPair(userId: string, tokenVersion: number): TokenPair {
+  const payload: TokenPayload = { sub: userId, tv: tokenVersion };
 
   const accessToken = jwt.sign(payload, config.jwt.accessSecret, {
+    algorithm: ALGORITHM,
     expiresIn: config.jwt.accessTtl,
   } as SignOptions);
 
   const refreshToken = jwt.sign(payload, config.jwt.refreshSecret, {
+    algorithm: ALGORITHM,
     expiresIn: config.jwt.refreshTtl,
   } as SignOptions);
 
@@ -29,9 +38,13 @@ export function signTokenPair(userId: string): TokenPair {
 }
 
 export function verifyAccessToken(token: string): TokenPayload {
-  return jwt.verify(token, config.jwt.accessSecret) as TokenPayload;
+  return jwt.verify(token, config.jwt.accessSecret, {
+    algorithms: [ALGORITHM],
+  }) as TokenPayload;
 }
 
 export function verifyRefreshToken(token: string): TokenPayload {
-  return jwt.verify(token, config.jwt.refreshSecret) as TokenPayload;
+  return jwt.verify(token, config.jwt.refreshSecret, {
+    algorithms: [ALGORITHM],
+  }) as TokenPayload;
 }

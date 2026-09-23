@@ -27,11 +27,11 @@ async function resolveSocialUser(
   provider: Provider,
   sub: string,
   email?: string,
-): Promise<string | null> {
+): Promise<{ id: string; tokenVersion: number } | null> {
   const bySub = await prisma.user.findFirst({
     where: { provider, providerSub: sub },
   });
-  if (bySub) return bySub.id;
+  if (bySub) return { id: bySub.id, tokenVersion: bySub.tokenVersion };
 
   const normalised = email?.toLowerCase().trim();
   if (!normalised) return null;
@@ -40,11 +40,11 @@ async function resolveSocialUser(
     where: { email: normalised },
   });
   if (byEmail) {
-    await prisma.user.update({
+    const linked = await prisma.user.update({
       where: { id: byEmail.id },
       data: { provider, providerSub: sub },
     });
-    return byEmail.id;
+    return { id: linked.id, tokenVersion: linked.tokenVersion };
   }
 
   const created = await prisma.user.create({
@@ -56,7 +56,7 @@ async function resolveSocialUser(
       preferences: { create: {} },
     },
   });
-  return created.id;
+  return { id: created.id, tokenVersion: created.tokenVersion };
 }
 
 export default async function socialRoutes(
@@ -79,28 +79,28 @@ export default async function socialRoutes(
         return reply.code(code).send({ error: message });
       }
 
-      const userId = await resolveSocialUser(
+      const resolved = await resolveSocialUser(
         provider,
         identity.sub,
         identity.email,
       );
-      if (!userId) {
+      if (!resolved) {
         return reply.code(400).send({
           error: "Provider supplied no email for a new account",
         });
       }
-      return reply.send(signTokenPair(userId));
+      return reply.send(signTokenPair(resolved.id, resolved.tokenVersion));
     };
 
   app.post<{ Body: { idToken: string } }>(
     "/auth/apple",
-    { schema: { body: bodySchema } },
+    { schema: { body: bodySchema }, config: { rateLimit: app.authRateLimit } },
     handle("apple", verifyAppleToken),
   );
 
   app.post<{ Body: { idToken: string } }>(
     "/auth/google",
-    { schema: { body: bodySchema } },
+    { schema: { body: bodySchema }, config: { rateLimit: app.authRateLimit } },
     handle("google", verifyGoogleToken),
   );
 }

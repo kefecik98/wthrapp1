@@ -1,5 +1,9 @@
 // Auth routes: register, login, refresh.
 // On register a user is created together with a default preferences row.
+//
+// Every route here carries the tight `app.authRateLimit` bucket rather than
+// the global default: this is the brute-force, credential-stuffing and
+// email-enumeration surface.
 
 import { FastifyInstance } from "fastify";
 import { prisma } from "../db";
@@ -19,7 +23,10 @@ const credentialsSchema = {
   required: ["email", "password"],
   properties: {
     email: { type: "string", format: "email" },
-    password: { type: "string", minLength: 8 },
+    // bcrypt only hashes the first 72 bytes, so anything beyond that is
+    // silently ignored. Bound it explicitly rather than accept megabyte
+    // "passwords" that all collapse to the same hash input.
+    password: { type: "string", minLength: 8, maxLength: 128 },
   },
 } as const;
 
@@ -27,7 +34,10 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
   // Create a new account.
   app.post<{ Body: CredentialsBody }>(
     "/auth/register",
-    { schema: { body: credentialsSchema } },
+    {
+      schema: { body: credentialsSchema },
+      config: { rateLimit: app.authRateLimit },
+    },
     async (request, reply) => {
       const email = request.body.email.toLowerCase().trim();
 
@@ -45,14 +55,17 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
         },
       });
 
-      return reply.code(201).send(signTokenPair(user.id));
+      return reply.code(201).send(signTokenPair(user.id, user.tokenVersion));
     },
   );
 
   // Exchange credentials for a fresh token pair.
   app.post<{ Body: CredentialsBody }>(
     "/auth/login",
-    { schema: { body: credentialsSchema } },
+    {
+      schema: { body: credentialsSchema },
+      config: { rateLimit: app.authRateLimit },
+    },
     async (request, reply) => {
       const email = request.body.email.toLowerCase().trim();
 
@@ -67,7 +80,7 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(401).send({ error: "Invalid credentials" });
       }
 
-      return reply.send(signTokenPair(user.id));
+      return reply.send(signTokenPair(user.id, user.tokenVersion));
     },
   );
 
@@ -75,6 +88,7 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: { refreshToken: string } }>(
     "/auth/refresh",
     {
+      config: { rateLimit: app.authRateLimit },
       schema: {
         body: {
           type: "object",
@@ -86,7 +100,19 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       try {
         const payload = verifyRefreshToken(request.body.refreshToken);
-        return reply.send(signTokenPair(payload.sub));
+        // Reject if the user was deleted or their tokens were revoked since
+        // this refresh token was issued — otherwise a stale or leaked refresh
+        // token could keep minting access tokens indefinitely.
+        const user = await prisma.user.findUnique({
+          where: { id: payload.sub },
+          select: { id: true, tokenVersion: true },
+        });
+        if (!user || user.tokenVersion !== payload.tv) {
+          return reply
+            .code(401)
+            .send({ error: "Invalid or expired refresh token" });
+        }
+        return reply.send(signTokenPair(user.id, user.tokenVersion));
       } catch {
         return reply
           .code(401)

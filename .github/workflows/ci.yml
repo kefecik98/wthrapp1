@@ -1,5 +1,7 @@
-name: CI
+name: CI + Deploy
 
+# CI (test) runs on every push and PR. CD (deploy) runs only after the server
+# tests pass on a push to main — see the `deploy` job at the bottom.
 on:
   push:
   pull_request:
@@ -66,3 +68,38 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
+
+  # ---------------------------------------------------------------------------
+  # CD: deploy the server to the rack.
+  #
+  # Runs ONLY when:
+  #   - the `server` test job above succeeded  (needs: server), AND
+  #   - the trigger is a push (not a PR) to the main branch  (if: ...).
+  # So a red test suite, or a PR, never deploys. The client job is NOT a
+  # gate here — client checks failing won't block a server deploy.
+  #
+  # `runs-on: self-hosted` sends this job to the runner installed on the app
+  # VM (see server/deploy/DEPLOY.md §8). That runner connects OUT to GitHub,
+  # so nothing needs to reach into the home network — no port-forwarding, no
+  # public IP, no SSH keys in GitHub. The deploy is then just local commands
+  # on the VM, driven by server/deploy/deploy.sh.
+  #
+  # The `vars.DEPLOY_ENABLED == 'true'` guard is the master on-switch. Until
+  # you set that repo variable (Settings → Secrets and variables → Actions →
+  # Variables), this job is SKIPPED — so before the runner exists it doesn't
+  # sit queued forever waiting for one. Flip it on only after §8 is done.
+  # ---------------------------------------------------------------------------
+  deploy:
+    needs: server
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      vars.DEPLOY_ENABLED == 'true'
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy to app VM
+        run: bash server/deploy/deploy.sh
+        env:
+          # The live app directory on the VM (a git clone from bootstrap).
+          DEPLOY_DIR: /opt/weatheralert

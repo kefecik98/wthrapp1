@@ -26,6 +26,10 @@ model User {
   // Apple private-relay addresses.
   provider     String?  @map("provider")
   providerSub  String?  @map("provider_sub")
+  // Bumped to revoke every outstanding token for this user (logout-all,
+  // password change, account deletion). Embedded in the JWT as `tv` and
+  // checked on each authenticated request and on refresh.
+  tokenVersion Int      @default(0) @map("token_version")
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   subscription Subscription?

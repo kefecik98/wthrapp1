@@ -52,3 +52,15 @@ export function useSocialSignIn() {
 export function useSignOut() {
   return useAuthStore((s) => s.signOut);
 }
+
+// Permanently delete the signed-in user's account (DELETE /account). The
+// server removes the user row and cascades to all their data; we then clear
+// the local session so the app returns to the login flow. Required by the
+// app stores (Apple 5.1.1(v) / Google Play Data Deletion).
+export function useDeleteAccount() {
+  const signOut = useAuthStore((s) => s.signOut);
+  return useMutation({
+    mutationFn: () => apiRequest<null>("/account", { method: "DELETE" }),
+    onSuccess: () => signOut(),
+  });
+}

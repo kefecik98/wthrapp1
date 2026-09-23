@@ -3,7 +3,7 @@
 
 import { FastifyInstance } from "fastify";
 import { prisma } from "../db";
-import { fetchMinutely } from "../services/weather";
+import { getMinutely } from "../services/forecastCache";
 
 export default async function weatherRoutes(
   app: FastifyInstance,
@@ -22,7 +22,9 @@ export default async function weatherRoutes(
       }
 
       try {
-        const minutes = await fetchMinutely(location.lat, location.lng);
+        // Shares the alert engine's grid-cell cache, so opening the app
+        // usually costs no Tomorrow.io call at all.
+        const minutes = await getMinutely(location.lat, location.lng);
         return reply.send({
           location: { lat: location.lat, lng: location.lng },
           updatedAt: location.updatedAt,

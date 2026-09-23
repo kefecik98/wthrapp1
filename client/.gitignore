@@ -31,7 +31,12 @@ yarn-error.*
 *.pem
 
 # local env files
+.env
 .env*.local
+
+# Firebase client config (project config; obtained out-of-band, never committed)
+google-services.json
+GoogleService-Info.plist
 
 # typescript
 *.tsbuildinfo

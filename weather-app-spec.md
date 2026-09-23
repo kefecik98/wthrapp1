@@ -13,9 +13,11 @@ A real-time hyperlocal weather alert app targeting people who work outdoors (con
 ## 2. Key Features
 
 - Real-time GPS location tracking (foreground + background)
-- Configurable alert lead time (e.g. 5, 10, 15, 30 minutes before event)
-- Configurable event types per user: rain, snow, hail, thunderstorm, high wind
-- Configurable intensity thresholds (e.g. only alert for heavy rain, not drizzle)
+- Two tiers: **free** = hourly rain-only alerts ("rain expected within the
+  hour"); **paid** = 5-minute cadence, all event types, plus the customization below
+- Configurable alert lead time — paid (e.g. 5, 10, 15, 30 minutes before event)
+- Configurable event types per user — paid: rain, snow, hail, thunderstorm, high wind
+- Configurable intensity thresholds — paid (e.g. only alert for heavy rain, not drizzle)
 - Push notifications delivered even when app is closed
 - In-app weather display (current conditions + short-term forecast)
 - Subscription paywall with free trial option
@@ -98,7 +100,7 @@ A real-time hyperlocal weather alert app targeting people who work outdoors (con
 │  │                                                      │  │
 │  │   REST API                   Alert Engine            │  │
 │  │   ─────────                  ─────────────           │  │
-│  │   POST /auth/login           node-cron (every 2 min) │  │
+│  │   POST /auth/login           node-cron (5 min/1 hr)  │  │
 │  │   POST /auth/register        │                       │  │
 │  │   PUT  /location             ├─ read active users    │  │
 │  │   GET  /weather              ├─ cluster by location  │  │
@@ -234,7 +236,20 @@ TaskManager.defineTask(LOCATION_TASK, async ({ data, error }) => {
 });
 ```
 
-### 6.3 Alert Engine (runs every 2 minutes on backend)
+### 6.3 Alert Engine (two tiers: paid every 5 min, free hourly)
+
+The engine runs as **two independent node-cron schedules**, differing in who
+they target and how they match:
+
+- **Paid** (`ALERT_ENGINE_CRON`, default every 5 min) — users with an
+  `active`/`trial` subscription. Honours each user's enabled event types,
+  intensity thresholds, and `alert_lead_min` lead time. This is the flow shown
+  below.
+- **Free** (`ALERT_ENGINE_FREE_CRON`, default hourly) — everyone else (no
+  subscription, or expired/cancelled). **Rain only**, fired for any rain in the
+  forecast window ("rain expected within the hour"), ignoring lead time. The
+  hourly cadence matches the ~60-minute forecast horizon, so there is no
+  coverage gap. Same clustering, dedup, and push path as below.
 
 ```
 node-cron fires
@@ -257,7 +272,7 @@ Cluster users by 1km² grid cell
   ▼
 For each unique grid cell:
   Call Tomorrow.io minutely forecast for that lat/lng
-  Cache response for 2 minutes (in-memory Map, keyed by grid_key)
+  Cache response for the duration of the cycle (in-memory Map, keyed by grid_key)
   │
   ▼
 For each user in that cell:
@@ -403,6 +418,11 @@ PowerEdge Rack
    real Google OAuth client IDs + `APPLE_CLIENT_ID` (config, not code).
 3. **FCM token management** — RESOLVED: client re-syncs the device token on
    rotation via `addPushTokenListener` -> `PUT /device/token`.
-4. **Free tier definition** — is there a free tier (limited alerts per day), or is it subscription-only from day one?
+4. **Free tier definition** — RESOLVED: limited-free. Free users get
+   **rain-only** alerts polled **hourly** ("rain expected within the hour").
+   Paid (`active`/`trial`) users get **all event types**, a **5-minute** poll
+   cadence, and customizable lead time (+ planned custom sound/vibration).
+   Implemented server-side as two cron tiers (§6.3); client preference-gating
+   + paywall copy still to do.
 5. **Background location on iOS** — Apple requires explicit justification for "always on" location permission; App Store review may push back; need a clear user-facing explanation
 6. **Alert UI** — deep link from push notification into the app (map view, radar, forecast detail?)

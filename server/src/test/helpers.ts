@@ -6,13 +6,25 @@
 // so the shared database is safe.
 
 import { FastifyInstance } from "fastify";
-import { buildServer } from "../app";
+import { buildServer, BuildServerOptions } from "../app";
 import { prisma } from "../db";
 import { signTokenPair, TokenPair } from "../lib/tokens";
 
-/** Boot a Fastify instance suitable for `inject()`. */
-export async function buildTestApp(): Promise<FastifyInstance> {
-  const app = await buildServer();
+/**
+ * Boot a Fastify instance suitable for `inject()`.
+ *
+ * Rate limits are lifted by default: every request in a test file comes from
+ * the same synthetic IP, so the real buckets would throttle a test run rather
+ * than an attacker. Pass an explicit `rateLimit` to exercise the limiter
+ * itself (see `routes/security.test.ts`).
+ */
+export async function buildTestApp(
+  options: BuildServerOptions = {},
+): Promise<FastifyInstance> {
+  const app = await buildServer({
+    ...options,
+    rateLimit: { max: 100_000, authMax: 100_000, ...options.rateLimit },
+  });
   await app.ready();
   return app;
 }
@@ -27,9 +39,13 @@ export async function resetDb(): Promise<void> {
   );
 }
 
-/** Sign a real token pair for an existing user id. */
+/**
+ * Sign a real token pair for an existing user id. Uses tokenVersion 0, which
+ * matches the default for freshly created users; tests that need a non-zero
+ * version sign their own tokens via `signTokenPair`.
+ */
 export function tokensFor(userId: string): TokenPair {
-  return signTokenPair(userId);
+  return signTokenPair(userId, 0);
 }
 
 /** Convenience: a Bearer Authorization header for `userId`. */

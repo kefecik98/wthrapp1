@@ -148,3 +148,60 @@ describe("POST /auth/refresh", () => {
     expect(res.statusCode).toBe(401);
   });
 });
+
+describe("token revocation (tokenVersion)", () => {
+  async function registerUser(email: string) {
+    const reg = await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: { email, password: "hunter2-long" },
+    });
+    const tokens = reg.json();
+    return { tokens, userId: verifyAccessToken(tokens.accessToken).sub };
+  }
+
+  it("rejects refresh once the account is deleted", async () => {
+    const { tokens, userId } = await registerUser("deleted@example.com");
+    await prisma.user.delete({ where: { id: userId } });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/auth/refresh",
+      payload: { refreshToken: tokens.refreshToken },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("rejects refresh once tokenVersion is bumped", async () => {
+    const { tokens, userId } = await registerUser("bumped@example.com");
+    await prisma.user.update({
+      where: { id: userId },
+      data: { tokenVersion: { increment: 1 } },
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/auth/refresh",
+      payload: { refreshToken: tokens.refreshToken },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("rejects an access token on a protected route after a tokenVersion bump", async () => {
+    const { tokens, userId } = await registerUser("revoked@example.com");
+    const headers = { authorization: `Bearer ${tokens.accessToken}` };
+
+    // Valid before revocation.
+    const before = await app.inject({ method: "GET", url: "/preferences", headers });
+    expect(before.statusCode).toBe(200);
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: { tokenVersion: { increment: 1 } },
+    });
+
+    // The same token is now rejected.
+    const after = await app.inject({ method: "GET", url: "/preferences", headers });
+    expect(after.statusCode).toBe(401);
+  });
+});

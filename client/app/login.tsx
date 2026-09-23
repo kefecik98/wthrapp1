@@ -28,6 +28,38 @@ WebBrowser.maybeCompleteAuthSession();
 
 type Mode = 'login' | 'register';
 
+// Google OAuth (id_token flow). expo-auth-session's hook THROWS when the
+// current platform's client id is undefined, so it must only run when Google
+// is configured — hence this dedicated subcomponent, rendered conditionally
+// by LoginScreen. Mounting/unmounting a component is the rules-of-hooks-safe
+// way to make the hook itself conditional.
+function GoogleSignInButton({
+  onToken,
+  disabled,
+}: {
+  onToken: (idToken: string) => void;
+  disabled: boolean;
+}) {
+  const [, response, prompt] = Google.useIdTokenAuthRequest({
+    iosClientId: config.google.iosClientId || undefined,
+    androidClientId: config.google.androidClientId || undefined,
+    webClientId: config.google.webClientId || undefined,
+  });
+
+  useEffect(() => {
+    if (response?.type === 'success' && response.params.id_token) {
+      onToken(response.params.id_token);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [response]);
+
+  return (
+    <Pressable style={styles.googleBtn} onPress={() => prompt()} disabled={disabled}>
+      <ThemedText style={styles.googleBtnText}>Continue with Google</ThemedText>
+    </Pressable>
+  );
+}
+
 export default function LoginScreen() {
   const [mode, setMode] = useState<Mode>('login');
   const [email, setEmail] = useState('');
@@ -41,37 +73,24 @@ export default function LoginScreen() {
   const credential = mode === 'login' ? login : register;
   const busy = login.isPending || register.isPending || social.isPending;
 
-  // Google OAuth (id_token flow). request is null until configured.
-  const [, googleResponse, googlePrompt] = Google.useIdTokenAuthRequest({
-    iosClientId: config.google.iosClientId || undefined,
-    androidClientId: config.google.androidClientId || undefined,
-    webClientId: config.google.webClientId || undefined,
-  });
-
   // Apple sign-in is only offered where the OS supports it (iOS 13+).
   useEffect(() => {
     AppleAuthentication.isAvailableAsync().then(setAppleAvailable);
   }, []);
 
-  // When Google returns an id_token, exchange it for our session.
-  useEffect(() => {
-    if (googleResponse?.type === 'success') {
-      const idToken = googleResponse.params.id_token;
-      if (idToken) {
-        social.mutate(
-          { provider: 'google', idToken },
-          {
-            onError: () =>
-              Alert.alert(
-                'Google sign-in unavailable',
-                'The backend rejected Google sign-in (POST /auth/google). See client/CONTEXT.md.',
-              ),
-          },
-        );
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [googleResponse]);
+  // Exchange a Google id_token for our session.
+  function onGoogleToken(idToken: string) {
+    social.mutate(
+      { provider: 'google', idToken },
+      {
+        onError: () =>
+          Alert.alert(
+            'Google sign-in unavailable',
+            'The backend rejected Google sign-in (POST /auth/google). See client/CONTEXT.md.',
+          ),
+      },
+    );
+  }
 
   function submit() {
     if (!email.trim() || !password) {
@@ -116,15 +135,11 @@ export default function LoginScreen() {
     }
   }
 
-  function onGoogle() {
-    if (!googleConfigured) {
-      Alert.alert(
-        'Google sign-in unavailable',
-        'Google sign-in is not configured. Set the EXPO_PUBLIC_GOOGLE_* client IDs (see client/.env.example).',
-      );
-      return;
-    }
-    googlePrompt();
+  function onGoogleUnavailable() {
+    Alert.alert(
+      'Google sign-in unavailable',
+      'Google sign-in is not configured. Set the EXPO_PUBLIC_GOOGLE_* client IDs (see client/.env.example).',
+    );
   }
 
   return (
@@ -199,11 +214,19 @@ export default function LoginScreen() {
         />
       )}
 
-      <Pressable style={styles.googleBtn} onPress={onGoogle} disabled={busy}>
-        <ThemedText style={styles.googleBtnText}>
-          Continue with Google
-        </ThemedText>
-      </Pressable>
+      {googleConfigured ? (
+        <GoogleSignInButton onToken={onGoogleToken} disabled={busy} />
+      ) : (
+        <Pressable
+          style={styles.googleBtn}
+          onPress={onGoogleUnavailable}
+          disabled={busy}
+        >
+          <ThemedText style={styles.googleBtnText}>
+            Continue with Google
+          </ThemedText>
+        </Pressable>
+      )}
     </ThemedView>
   );
 }
