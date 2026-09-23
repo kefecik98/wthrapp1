@@ -47,7 +47,7 @@ user data — the app sends it only grid-cell centres.
 | vCPU | 12 | the NBM job runs 12 OpenMP threads |
 | RAM | 48 GB | 32 GB free for ingest + API + OS |
 | System disk | 32 GB | |
-| **Data disk** | **~500 GB, SSD, ext4**, mounted at `/srv/pirate-weather` | ~200 GB ingest working space + ~50 GB served data + headroom. Upstream warns ext4 is much faster than NTFS. |
+| **Data volume** | **~380–500 GB, SSD, ext4**, mounted at `/srv/pirate-weather` | ~200 GB ingest working space + ~50 GB served data + headroom. Upstream warns ext4 is much faster than NTFS. Its own filesystem (LVM volume or second disk) — see step 2. |
 
 Give it a **static LAN IP** — the app VM's `PIRATE_WEATHER_BASE_URL` points at
 it. This runbook calls it `<WEATHER_IP>`; the app VM's is `<APP_IP>`.
@@ -59,14 +59,27 @@ sudo apt update && sudo apt install -y git curl vnstat
 curl -fsSL https://get.docker.com | sudo sh
 sudo usermod -aG docker "$USER" && newgrp docker
 
-# Data disk (adjust the device to match the Proxmox disk).
-sudo mkfs.ext4 /dev/sdb
+# Data volume. The Ubuntu installer leaves most of the disk unallocated
+# in LVM, so carve a volume from that (check VFree first). A second virtual
+# disk works too — the point is a separate filesystem, so a runaway ingest
+# can't fill / and take the VM down.
+sudo vgs                                          # VFree
+sudo lvcreate -L 380G -n pirate ubuntu-vg
+sudo mkfs.ext4 -L pirate /dev/ubuntu-vg/pirate    # easy to miss — no FS, no mount
 sudo mkdir -p /srv/pirate-weather
-echo '/dev/sdb /srv/pirate-weather ext4 defaults,noatime 0 2' | sudo tee -a /etc/fstab
-sudo mount -a
+sudo chattr +i /srv/pirate-weather                # unmounted = unwritable
+echo '/dev/ubuntu-vg/pirate /srv/pirate-weather ext4 defaults,noatime,nofail 0 2' | sudo tee -a /etc/fstab
+sudo systemctl daemon-reload && sudo mount /srv/pirate-weather
+findmnt /srv/pirate-weather                       # must show the volume
 sudo mkdir -p /srv/pirate-weather/Weather /srv/pirate-weather/Work
 sudo chown -R "$USER:$USER" /srv/pirate-weather
 ```
+
+Why the two extras: `chattr +i` on the empty mount point means that if the
+volume is ever *not* mounted, ingest fails instead of silently filling the
+root disk; `nofail` means a volume problem can't strand the VM in emergency
+mode at boot. Always confirm with `findmnt` — an fstab line for a volume
+without a filesystem looks fine until the next reboot.
 
 `vnstat` starts counting traffic now — you'll want a week of numbers (step 9).
 
