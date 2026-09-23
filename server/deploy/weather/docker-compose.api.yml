@@ -1,0 +1,50 @@
+# WeatherAlert's addition to Pirate Weather's local compose: the API server.
+#
+# Pirate Weather's pirate-compose_oph.local.yml runs the ingest jobs only —
+# its api_server is commented out and points at their AWS paths. This file
+# is layered on top of it:
+#
+#   cd /opt/pirate-weather
+#   docker compose -f pirate-compose_oph.local.yml \
+#                  -f /opt/weatheralert-weather/docker-compose.api.yml up -d
+#
+# See README.md in this directory for the full runbook.
+
+services:
+  pw_api:
+    # Built from Pirate Weather's own Dockerfile at the pinned release (see
+    # README step 3), so it runs on x64 and matches the ingest code exactly.
+    image: pirateapi:${PW_RELEASE:?set PW_RELEASE in .env, e.g. v0.7.2}
+    build:
+      context: .
+      dockerfile: Docker/pirate-api-dockerfile
+    container_name: pirate-api
+    restart: unless-stopped
+    volumes:
+      # Read-only: the API never writes model data. /data/api holds symlinks
+      # (made by link-stores.sh) from the names the API expects to the paths
+      # the ingest jobs write.
+      - ${PW_WEATHER_ROOT:-/mnt/pirate-weather/Weather}:/data:ro
+    environment:
+      STAGE: "PROD" # PROD = load the local zarr stores (API/io/zarr_reader.py)
+      save_type: "Download"
+      save_dir: "/data/api"
+      use_etopo: "False" # no ETOPO elevation file in a local install
+      TIMING: "False"
+    command: ["API.responseLocal:app", "--host", "0.0.0.0", "--port", "8083"]
+    ports:
+      # Bind to the VM's LAN address only. Docker publishes ports around ufw,
+      # so the real access control is the Proxmox firewall (README step 6):
+      # only the app VM may reach this port.
+      - "${PW_API_BIND:?set PW_API_BIND in .env to this VM's LAN IP}:8083:8083"
+    healthcheck:
+      # The slim image has no curl; any HTTP answer means uvicorn is up.
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request as u; u.urlopen('http://127.0.0.1:8083/forecast/health/47.6,-122.3?exclude=currently,hourly,daily,alerts', timeout=20)"
+      interval: 60s
+      timeout: 30s
+      retries: 3
+      start_period: 10m # it loads every store at startup; can take minutes

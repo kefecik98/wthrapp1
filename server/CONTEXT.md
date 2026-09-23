@@ -47,6 +47,7 @@ src/
     forecastCache.ts   grid-cell cache in front of the live provider
     providers/         WeatherProvider interface + registry (WEATHER_PROVIDER)
       tomorrow.ts      Tomorrow.io adapter
+      pirateWeather.ts Pirate Weather adapter (self-hosted, weather VM)
     push.ts            lazy FCM init + sendPush
     appleAuth.ts       verify Apple identity token (JWKS)
     googleAuth.ts      verify Google id_token (google-auth-library)

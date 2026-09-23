@@ -445,9 +445,23 @@ Plan:
       moved behind it, `TomorrowMinute` → `ForecastMinute` (same wire
       shape), `WEATHER_PROVIDER` config (validated at startup), cache keys
       scoped by provider name. No behaviour change.
-- [ ] Pirate Weather adapter + fixture tests (hosted API key is enough to
-      build against). Make `TOMORROW_API_KEY` required only when Tomorrow.io
-      is the live or shadow provider.
+- [x] Pirate Weather adapter (branch `pirate-weather-adapter`):
+      `services/providers/pirateWeather.ts` converts the Dark Sky-format
+      response into `ForecastMinute` (unix → ISO, precipType strings →
+      codes, probability ×100, wind from the matching hourly point, thunder
+      from hourly CAPE ≥ 2500 J/kg while precipitating, `-999` → no data).
+      `WEATHER_PROVIDER=pirate` + `PIRATE_WEATHER_BASE_URL`; each provider's
+      credentials are required only while it is live. Tests use a
+      **hand-built** fixture — replace it with a real capture (runbook §8).
+- [x] Weather VM runbook: `server/deploy/weather/` (README, compose
+      override adding the API server, `link-stores.sh`). Pinned to Pirate
+      Weather v0.7.2. Written from their code, **not yet run**.
+- [ ] (K) Create the weather VM and run the runbook's first ingest.
+      Separate VM on purpose: ≥32 GB free RAM per ingest, and Ofelia mounts
+      the Docker socket.
+- [ ] Runbook **VERIFY** items on first run: ingest output layout; whether
+      the API serves fresh data without a restart; `flags` source names;
+      a week of `vnstat` download volume.
 - [ ] Shadow mode: the engine also evaluates the second provider and logs
       disagreements (would-alert / wouldn't, and start-time delta) without
       sending. Run 2–4 weeks covering real precipitation events.

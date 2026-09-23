@@ -33,6 +33,11 @@ export default defineConfig({
         "postgresql://test:test@localhost:5432/test",
       TOMORROW_API_KEY:
         process.env.TOMORROW_API_KEY ?? fileEnv.TOMORROW_API_KEY ?? "test",
+      // Pinned like ENABLE_DEV_ROUTES: tests must never reach a real
+      // instance, even if a developer's .env points at one on the LAN.
+      WEATHER_PROVIDER: "tomorrow",
+      PIRATE_WEATHER_BASE_URL: "http://pirate-weather.test:8083",
+      PIRATE_WEATHER_API_KEY: "test",
       REVENUECAT_WEBHOOK_SECRET:
         process.env.REVENUECAT_WEBHOOK_SECRET ??
         fileEnv.REVENUECAT_WEBHOOK_SECRET ??
