@@ -1,6 +1,8 @@
-// Cross-cycle forecast cache.
+// Cross-cycle forecast cache — the only way anything reads a forecast.
 //
-// Tomorrow.io bills per call, and the alert engine's call volume used to be
+// It fronts whichever provider WEATHER_PROVIDER selects (services/providers)
+// and is shared by the alert engine and GET /weather. Tomorrow.io bills per
+// call, and the alert engine's call volume used to be
 // `runs/day × occupied cells` because the cache was rebuilt on every cycle.
 // Caching by grid cell *across* cycles decouples spend from cron cadence:
 // volume becomes `(1440 / ttlMinutes) × cells` no matter how often the engine
@@ -17,10 +19,11 @@
 
 import { config } from "../config";
 import { cellKey, snapToGrid } from "../lib/grid";
-import { fetchMinutely, TomorrowMinute } from "./weather";
+import { weatherProvider } from "./providers";
+import type { ForecastMinute } from "./weather";
 
 interface CacheEntry {
-  minutes: TomorrowMinute[];
+  minutes: ForecastMinute[];
   expiresAt: number;
 }
 
@@ -29,7 +32,7 @@ const cache = new Map<string, CacheEntry>();
 // In-flight requests, so concurrent callers for the same cell (the free and
 // paid cycles overlapping, or several `GET /weather` requests) share a single
 // upstream call instead of racing to fill the same key.
-const inFlight = new Map<string, Promise<TomorrowMinute[]>>();
+const inFlight = new Map<string, Promise<ForecastMinute[]>>();
 
 /**
  * Forecast cell key (`FORECAST_CELL_DEG`, default 0.1° ≈ 11 km). Every user
@@ -64,8 +67,11 @@ function prune(now: number): void {
 export async function getMinutely(
   lat: number,
   lng: number,
-): Promise<TomorrowMinute[]> {
-  const key = gridKey(lat, lng);
+): Promise<ForecastMinute[]> {
+  const provider = weatherProvider();
+  // Scoped by provider, so two providers (e.g. a shadow run) can never
+  // serve each other's forecasts.
+  const key = `${provider.name}:${gridKey(lat, lng)}`;
   const now = Date.now();
 
   const hit = cache.get(key);
@@ -80,7 +86,8 @@ export async function getMinutely(
   // to everyone in the cell, so it should be centred on the cell — and the
   // weather provider never sees a user's own coordinates.
   const centre = snapToGrid(lat, lng, config.forecast.cellDeg);
-  const request = fetchMinutely(centre.lat, centre.lng)
+  const request = provider
+    .fetchMinutely(centre.lat, centre.lng)
     .then((minutes) => {
       cache.set(key, {
         minutes,

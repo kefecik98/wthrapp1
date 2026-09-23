@@ -1,17 +1,26 @@
-// Tomorrow.io weather client + event-matching logic.
-// See weather-app-spec.md sections 6.5 for the data shape and thresholds.
+// Forecast data shape + event matching. Provider-neutral: the weather
+// provider adapters in ./providers convert their own API responses into
+// ForecastMinute, and everything downstream (cache, alert engine,
+// GET /weather) only ever sees that shape.
+// See weather-app-spec.md §6.5 for the thresholds.
 
-import { config } from "../config";
-
-// Relevant fields from a single minute of the Tomorrow.io minutely timeline.
-export interface TomorrowMinute {
+/**
+ * One minute of forecast, in our own format.
+ *
+ * This is also a wire contract: GET /weather sends these objects to the app
+ * unchanged, and shipped app builds read `values.precipitationType` codes
+ * and `precipitationIntensity` directly. Adapters must fill every field with
+ * exactly these units and codes; changing the shape breaks installed apps.
+ * (Field names happen to match Tomorrow.io's, which was the first provider.)
+ */
+export interface ForecastMinute {
   time: string; // ISO timestamp
   values: {
     precipitationIntensity: number; // mm/hr
     precipitationType: number; // 0=none 1=rain 2=snow 3=freezing rain 4=ice pellets (hail)
     precipitationProbability: number; // 0-100
     windSpeed: number; // m/s
-    thunderstormProbability?: number; // 0-100 (may be absent on free tier)
+    thunderstormProbability?: number; // 0-100 (not every provider has it)
   };
 }
 
@@ -50,58 +59,11 @@ function intensityThreshold(level: string): number {
 }
 
 /**
- * Fetch the next 60 minutes of forecast for a point from Tomorrow.io.
- * Throws on a non-2xx response so callers can decide how to handle it.
- */
-export async function fetchMinutely(
-  lat: number,
-  lng: number,
-): Promise<TomorrowMinute[]> {
-  const url = new URL(`${config.tomorrow.baseUrl}/timelines`);
-  url.searchParams.set("location", `${lat},${lng}`);
-  url.searchParams.set(
-    "fields",
-    [
-      "precipitationIntensity",
-      "precipitationType",
-      "precipitationProbability",
-      "windSpeed",
-      "thunderstormProbability",
-    ].join(","),
-  );
-  url.searchParams.set("timesteps", "1m");
-  url.searchParams.set("units", "metric");
-  url.searchParams.set("apikey", config.tomorrow.apiKey);
-
-  const res = await fetch(url, {
-    method: "GET",
-    signal: AbortSignal.timeout(config.tomorrow.timeoutMs),
-  });
-  if (!res.ok) {
-    throw new Error(
-      `Tomorrow.io request failed: ${res.status} ${res.statusText}`,
-    );
-  }
-
-  // Tomorrow.io's /timelines keys each interval by `startTime`; the matcher
-  // reads `time`, so normalise here rather than leak the API shape inward.
-  const body = (await res.json()) as {
-    data?: {
-      timelines?: {
-        intervals?: { startTime: string; values: TomorrowMinute["values"] }[];
-      }[];
-    };
-  };
-  const intervals = body.data?.timelines?.[0]?.intervals ?? [];
-  return intervals.map((i) => ({ time: i.startTime, values: i.values }));
-}
-
-/**
  * Find the first upcoming minute that matches one of the user's enabled
  * event types. Returns null when nothing relevant is forecast.
  */
 export function findNextEvent(
-  minutes: TomorrowMinute[],
+  minutes: ForecastMinute[],
   prefs: PreferenceThresholds,
 ): WeatherEvent | null {
   for (const minute of minutes) {

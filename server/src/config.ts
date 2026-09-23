@@ -21,6 +21,24 @@ function optional(name: string, fallback: string): string {
 }
 
 /**
+ * Weather providers that have an adapter in services/providers. The registry
+ * there is typed against this list, so the two can't drift apart.
+ */
+export const WEATHER_PROVIDERS = ["tomorrow"] as const;
+export type WeatherProviderName = (typeof WEATHER_PROVIDERS)[number];
+
+/** WEATHER_PROVIDER, validated against the providers we have adapters for. */
+function weatherProviderName(): WeatherProviderName {
+  const value = optional("WEATHER_PROVIDER", "tomorrow");
+  if (!(WEATHER_PROVIDERS as readonly string[]).includes(value)) {
+    throw new Error(
+      `WEATHER_PROVIDER must be one of ${WEATHER_PROVIDERS.join(", ")}, got "${value}"`,
+    );
+  }
+  return value as WeatherProviderName;
+}
+
+/**
  * Forecast cell size in degrees. Must be at least the location grid: users
  * are only ever stored at LOCATION_GRID_DEG, so a finer forecast cell would
  * cost more upstream calls without locating anyone more precisely.
@@ -67,6 +85,12 @@ export const config = {
   },
 
   databaseUrl: required("DATABASE_URL"),
+
+  weather: {
+    // Which adapter in services/providers serves forecasts. Switching is a
+    // config change + restart; every caller goes through the seam.
+    provider: weatherProviderName(),
+  },
 
   tomorrow: {
     apiKey: required("TOMORROW_API_KEY"),
