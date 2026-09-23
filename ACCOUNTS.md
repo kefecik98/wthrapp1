@@ -28,12 +28,17 @@ at signup.
 
 ## Networking for the rack
 
+The rack is reached through a VPS relay (`frps`) that the rack dials out to —
+no inbound port on the home router. See `server/deploy/DEPLOY.md`.
+
 | Account | Cost to create | Cost to test | Notes |
 |---|---|---|---|
-| **Domain name** | $10–15/yr | $10–15/yr | Cloudflare Registrar, Porkbun, or Namecheap all fine. Required for a real TLS cert via Let's Encrypt. |
-| **DDNS** (alternative) | Free | Free | DuckDNS or Cloudflare DDNS give you a hostname pointed at your dynamic IP. Works with Let's Encrypt. Use this if you want $0 instead of buying a domain. |
-| **Let's Encrypt / Certbot** | Free | Free | TLS certs, 90-day auto-renew. Configured by `server/deploy/nginx/weatheralert.conf`. |
-| **Static IP from ISP** *(optional)* | Varies | Varies | Often $5–20/mo extra on residential. Not required if you use DDNS. |
+| **Domain name** | $10–15/yr | $10–15/yr | **Required.** Cloudflare Registrar, Porkbun, or Namecheap all fine (registrar only — don't proxy traffic through Cloudflare; TLS must terminate on the rack). One `A` record → the VPS IP. The hostname is baked into the app build, so pick it before the first release build. |
+| **VPS** (frp relay) | ~€4/mo | ~€4/mo | Hetzner / Vultr / DigitalOcean smallest plan. Needs a static public IP. Runs only `frps` as a raw TCP relay on :443 — holds no certificate and can't read traffic. |
+| **Let's Encrypt** (via Caddy) | Free | Free | Caddy on the rack obtains and renews certs automatically over TLS-ALPN-01. Needs only `ACME_EMAIL`. |
+
+DDNS and a static home IP are no longer needed — the VPS IP is the only
+public address, and it's static.
 
 ## Already required, no cost
 
@@ -47,27 +52,29 @@ at signup.
 
 | Scope | Out-of-pocket |
 |---|---|
-| Server + alert engine + Android client (sideloaded) + DDNS | **$0** |
-| Add iOS client (real device) | **$99/yr** (Apple Developer) |
-| Add a real domain | **+ $10–15/yr** |
+| Server + alert engine + Android client (sideloaded), local only | **$0** |
+| Put the server on the internet (domain + VPS) | **~$12/yr + ~€4/mo** |
 | Eventually publish to Play Store | **+ $25 one-time** |
-| Production-ready, both platforms, real domain | **~$124 in year 1, $99/yr after** |
+| **Android launch** (domain + VPS + Play) | **~$37 + ~€4/mo in year 1** |
+| Add iOS later | **+ $99/yr** |
 
 ---
 
 ## Registration order
 
-1. **Free, do first**: Tomorrow.io, Firebase, Google Cloud OAuth,
-   RevenueCat, DuckDNS (or buy a domain). Enough to stand up the server
-   on the rack and validate end-to-end on Android.
-2. **When Android validates**: Apple Developer Program ($99). Enrolment
-   lag is the long pole — start it the moment you have momentum, not
-   later. While it's pending, Apple-side work is blocked but everything
-   else continues.
-3. **When ready to ship**: Google Play Console ($25 one-time).
+Launch target is **Android only** (2026-09-23), so Apple is off the
+critical path.
 
-**Long-pole warning:** Apple Developer enrolment is the single biggest gate
-on the project. Push iOS uses APNs, APNs needs an Apple Dev account, Sign
-in with Apple needs one too, and approval is human-reviewed. Worth
-starting that application even before server validation is finished if
-iOS is a launch target.
+1. **Free, do first**: Tomorrow.io, Firebase, Google Cloud OAuth,
+   RevenueCat.
+2. **To go live**: a domain + a VPS. Enough to stand up the server on the
+   rack and validate end-to-end on a physical Android phone.
+3. **Early, not last**: Google Play Console ($25 one-time). Identity
+   verification takes days, and new personal accounts must run a 14-day
+   closed test before production access — that's now the long pole.
+4. **Later, if iOS**: Apple Developer Program ($99/yr).
+
+**Long-pole warning:** for the Android launch, the long pole is Play
+Console — account verification plus the mandatory closed-test period for
+new personal accounts. Register it as soon as the server is reachable, so
+the 14-day clock runs while you finish the store listing.
