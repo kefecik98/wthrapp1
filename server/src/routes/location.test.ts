@@ -42,7 +42,7 @@ describe("PUT /location", () => {
       method: "PUT",
       url: "/location",
       headers: bearer(user.id),
-      payload: { lat: 40.7, lng: -74.0, accuracy: 12.5 },
+      payload: { lat: 40.695, lng: -73.995 }, // already a 0.03° cell centre
     });
     expect(res.statusCode).toBe(204);
 
@@ -50,9 +50,27 @@ describe("PUT /location", () => {
       where: { userId: user.id },
     });
     expect(row).not.toBeNull();
-    expect(row!.lat).toBeCloseTo(40.7);
-    expect(row!.lng).toBeCloseTo(-74.0);
-    expect(row!.accuracyM).toBeCloseTo(12.5);
+    expect(row!.lat).toBe(40.695);
+    expect(row!.lng).toBe(-73.995);
+  });
+
+  it("never stores an exact position — snaps to the location grid", async () => {
+    // An old app build (or anything else) sending a precise GPS fix.
+    const user = await makeUser();
+    await app.inject({
+      method: "PUT",
+      url: "/location",
+      headers: bearer(user.id),
+      payload: { lat: 47.6062, lng: -122.3321, accuracy: 4.2 },
+    });
+
+    const row = await prisma.userLocation.findUnique({
+      where: { userId: user.id },
+    });
+    expect(row!.lat).toBe(47.595);
+    expect(row!.lng).toBe(-122.325);
+    // Accuracy describes the exact fix, so it isn't kept either.
+    expect(row!.accuracyM).toBeNull();
   });
 
   it("upserts on subsequent calls (one row per user)", async () => {
@@ -73,7 +91,7 @@ describe("PUT /location", () => {
     const row = await prisma.userLocation.findUnique({
       where: { userId: user.id },
     });
-    expect(row!.lat).toBeCloseTo(41.0);
+    expect(row!.lat).toBeCloseTo(41.0, 1);
   });
 
   it("rejects out-of-range coordinates with 400", async () => {

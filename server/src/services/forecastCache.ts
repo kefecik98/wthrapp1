@@ -16,6 +16,7 @@
 // lead time the client can request.
 
 import { config } from "../config";
+import { cellKey, snapToGrid } from "../lib/grid";
 import { fetchMinutely, TomorrowMinute } from "./weather";
 
 interface CacheEntry {
@@ -31,13 +32,11 @@ const cache = new Map<string, CacheEntry>();
 const inFlight = new Map<string, Promise<TomorrowMinute[]>>();
 
 /**
- * Grid key: ~0.1° (~11 km) cell. Keeps nearby users on one API call.
- * `Math.floor` toward negative infinity is intentional — it gives stable,
- * non-overlapping cells in the southern and western hemispheres too.
+ * Forecast cell key (`FORECAST_CELL_DEG`, default 0.1° ≈ 11 km). Every user
+ * in a cell shares one upstream call and one forecast.
  */
 export function gridKey(lat: number, lng: number): string {
-  const cell = (n: number) => Math.floor(n * 10) / 10;
-  return `${cell(lat)}_${cell(lng)}`;
+  return cellKey(lat, lng, config.forecast.cellDeg);
 }
 
 /** Drop expired entries. Called on each miss, so the map can't grow forever. */
@@ -77,7 +76,11 @@ export async function getMinutely(
 
   prune(now);
 
-  const request = fetchMinutely(lat, lng)
+  // Fetch at the cell's centre, not the caller's point: the result is served
+  // to everyone in the cell, so it should be centred on the cell — and the
+  // weather provider never sees a user's own coordinates.
+  const centre = snapToGrid(lat, lng, config.forecast.cellDeg);
+  const request = fetchMinutely(centre.lat, centre.lng)
     .then((minutes) => {
       cache.set(key, {
         minutes,

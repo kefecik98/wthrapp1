@@ -162,7 +162,8 @@ subscriptions
   revenuecat_user_id  TEXT
   updated_at          TIMESTAMPTZ
 
--- Last known GPS position per user
+-- Last known location per user, as the CENTRE of its 0.03° grid cell —
+-- never an exact GPS position (see §6.2). accuracy_m is always NULL.
 user_locations
   user_id     UUID PRIMARY KEY REFERENCES users(id)
   lat         DOUBLE PRECISION NOT NULL
@@ -221,18 +222,31 @@ expo-location (background task)
   └── Background: significant location change (~500m threshold)
         │
         ▼
-  PUT /location  { lat, lng, accuracy }
+  Phone snaps the fix to its 0.03° grid cell (~3 km)
         │
         ▼
-  Backend writes to user_locations (upsert on user_id)
+  PUT /location  { lat, lng }   ← cell centre only
+        │
+        ▼
+  Backend re-snaps (defence in depth) and writes to user_locations
+  (upsert on user_id)
 ```
+
+**Privacy boundary (decided 2026-09-23):** an exact GPS position never
+leaves the phone. The app keeps the precise-location permission so the phone
+can place itself in the *right* cell (Android's approximate location is only
+~1.7 km accurate — too coarse to pick a 3 km cell reliably), but it sends
+only the cell centre. 0.03° matches the ~3 km resolution of the forecast
+models, so no forecast accuracy is lost, and stays above Google Play's
+3 km² "approximate location" line up to ~70° latitude. The grid maths is
+`client/src/lib/grid.ts` / `server/src/lib/grid.ts` (identical copies with
+shared test vectors).
 
 ```typescript
 // Mobile: register background location task
 TaskManager.defineTask(LOCATION_TASK, async ({ data, error }) => {
   const { locations } = data;
-  const { lat, lng } = locations[0].coords;
-  await api.put('/location', { lat, lng });
+  await api.put('/location', toReportedLocation(locations[0].coords));
 });
 ```
 
@@ -266,12 +280,13 @@ Fetch active users
     AND ul.updated_at > now() - interval '30 minutes'   ← skip stale locations
   │
   ▼
-Cluster users by 1km² grid cell
-  grid_key = `${floor(lat * 10) / 10}_${floor(lng * 10) / 10}`
+Cluster users by forecast cell (FORECAST_CELL_DEG, default 0.1° ≈ 11 km;
+0.03° ≈ 3 km once weather calls are cheap)
+  grid_key = centre of the cell containing the user's stored location
   │
   ▼
 For each unique grid cell:
-  Call Tomorrow.io minutely forecast for that lat/lng
+  Call Tomorrow.io minutely forecast at the CELL CENTRE
   Cache response for the duration of the cycle (in-memory Map, keyed by grid_key)
   │
   ▼

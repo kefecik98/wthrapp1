@@ -41,16 +41,19 @@ export function LocationDisclosure({ visible, onAccept, onDecline }: Props) {
 
             <ThemedText style={styles.heading}>How it is used</ThemedText>
             <ThemedText style={styles.body}>
-              • Your location is sent to our server and used only to check
-              the forecast for where you are and to decide when to alert you.
+              • Your phone rounds your position to a grid square about 3 km
+              across before sending it. Your exact location never leaves your
+              phone.
             </ThemedText>
             <ThemedText style={styles.body}>
-              • Coordinates are shared with our weather data provider to fetch
-              that forecast. They are never sold or used for advertising.
+              • That grid square is used only to check the forecast for your
+              area and decide when to alert you. Our weather data provider
+              only ever sees the centre of a wider forecast area, never your
+              own position. Nothing is sold or used for advertising.
             </ThemedText>
             <ThemedText style={styles.body}>
-              • We keep only your most recent location, and delete it when you
-              delete your account.
+              • We keep only your most recent grid square, and delete it when
+              you delete your account.
             </ThemedText>
 
             <ThemedText style={styles.heading}>What happens next</ThemedText>

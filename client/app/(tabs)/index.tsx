@@ -20,6 +20,7 @@ import { registerForPush } from '@/src/services/push';
 import {
   hasBackgroundLocationPermission,
   startLocationUpdates,
+  toReportedLocation,
 } from '@/src/services/location';
 
 const PRECIP: Record<number, string> = {
@@ -69,13 +70,10 @@ export default function HomeScreen() {
     // Post one fix immediately so the forecast works without waiting for
     // the next background update.
     const pos = await Location.getCurrentPositionAsync({});
+    // Only the grid cell leaves the phone, never the exact fix.
     await apiRequest('/location', {
       method: 'PUT',
-      body: {
-        lat: pos.coords.latitude,
-        lng: pos.coords.longitude,
-        accuracy: pos.coords.accuracy ?? undefined,
-      },
+      body: toReportedLocation(pos.coords),
     });
     qc.invalidateQueries({ queryKey: ['weather'] });
   }

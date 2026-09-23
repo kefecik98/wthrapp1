@@ -36,11 +36,13 @@ how to delete it.</p>
 <h2>What we collect</h2>
 <table>
   <tr><th>Data</th><th>Why</th></tr>
-  <tr><td><strong>Location</strong> — your most recent GPS coordinates, their
-    accuracy, and when they were recorded. Collected in the background, while
-    the app is closed, if you allow it.</td>
-    <td>To check the forecast where you are and alert you before weather
-    arrives. We keep only your latest location; each update overwrites the
+  <tr><td><strong>Approximate location</strong> — the grid square, about
+    3 km across, that your phone is in, and when it was last updated. Your
+    phone works out the square itself: <strong>your exact GPS position never
+    leaves your device.</strong> Collected in the background, while the app is
+    closed, if you allow it.</td>
+    <td>To check the forecast for your area and alert you before weather
+    arrives. We keep only your latest grid square; each update overwrites the
     previous one. We do not keep a location history.</td></tr>
   <tr><td><strong>Account</strong> — your email address, and either a
     password (stored only as a one-way hash) or the account identifier Google
@@ -71,9 +73,10 @@ your data.</p>
 <p>Our servers are run by us, and every connection to them is encrypted. We
 use these services to provide the app, and share only what each one needs:</p>
 <ul>
-  <li><strong>Tomorrow.io</strong> (weather data) receives map coordinates in
-    your area so it can return the forecast. We do not send your name, email
-    or any account identifier with them.</li>
+  <li><strong>Tomorrow.io</strong> (weather data) receives the centre point of
+    the forecast area you are in — an area several kilometres across that is
+    shared by everyone in it, never your own position — so it can return the
+    forecast. Nothing identifying you is sent with it.</li>
   <li><strong>Google Firebase Cloud Messaging</strong> receives your push token
     and the text of each alert, to deliver it to your device.</li>
   <li><strong>RevenueCat</strong> and <strong>Google Play</strong> handle

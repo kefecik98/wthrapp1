@@ -77,14 +77,24 @@ waits on Apple enrolment.
 - [x] Stale "Nginx" comments in server code now say Caddy.
 - [x] HSTS — the Caddyfile sets `Strict-Transport-Security` on the API
       domain (helmet keeps `hsts: false`; the TLS terminator owns it).
-- [ ] **Send the grid-cell centre, not the user's exact point, to the
-      weather provider.** `forecastCache.getMinutely` passes the first
-      requester's precise lat/lng to `fetchMinutely`, then serves that
-      forecast to everyone in the ~11 km cell. Querying the cell centre gives
-      every user in the cell the same, better-centred forecast and means the
-      provider never sees a real user's coordinates — which would let the
-      privacy policy say so. Small change; moot if weather moves in-house
-      (see the Pirate Weather evaluation).
+- [x] **Grid-only location (2026-09-23).** The phone snaps every fix to a
+      0.03° (~3 km) cell and sends only the cell centre
+      (`client/src/lib/grid.ts`, `toReportedLocation` in
+      `services/location.ts`); the server re-snaps on receipt and drops
+      accuracy (`server/src/lib/grid.ts`, `routes/location.ts`), and a data
+      migration coarsened any stored rows. Forecast cells are separate and
+      configurable (`FORECAST_CELL_DEG`, default 0.1°; must be ≥ 0.03°),
+      and forecasts are fetched at the cell centre, so the weather provider
+      never sees a user's own coordinates. Disclosure, privacy policy and
+      spec §5/§6.2/§6.3 updated. Precise-location permission is kept on
+      purpose: Android's approximate fix (~1.7 km) is too coarse to place a
+      user in the right 3 km cell.
+- [ ] **Drop `FORECAST_CELL_DEG` to 0.03** once weather calls are cheap
+      (self-hosted Pirate Weather). At 0.1° a cell is ~11 km and rain can
+      fall on one side and not the other. On Tomorrow.io's free tier, 0.03°
+      supports only ~3 occupied cells (≈ 2–3 users).
+- [ ] Play Data safety: declare **approximate** location (collected,
+      background), not precise — only the ~3 km cell leaves the device.
 - [ ] **Custom alert sound/vibration (paid).** New per-user sound/vibration
       settings: needs server prefs fields + client UI. Android gotcha — a
       notification channel's sound/importance is locked after creation, so

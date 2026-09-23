@@ -8,8 +8,8 @@
 //          the forecast window ("rain expected within the hour"). Reuses the
 //          same ~60-minute forecast, so an hourly poll has no coverage gap.
 //
-// Users are clustered into ~0.1° grid cells so we make at most one Tomorrow.io
-// call per cell, instead of one call per user. That cache lives in
+// Users are clustered into forecast cells (FORECAST_CELL_DEG, default 0.1°)
+// so we make at most one Tomorrow.io call per cell, instead of one per user. That cache lives in
 // services/forecastCache and persists *across* cycles (and is shared with
 // GET /weather), so call volume tracks the cache TTL rather than the cron
 // cadence — see the note at the top of that file.
