@@ -1,0 +1,48 @@
+# Caddy terminates TLS for WeatherAlert, on the rack.
+#
+# This is the ONLY machine that holds the private key. The VPS in front of it
+# relays raw TCP and never sees plaintext — that is the whole point of the
+# architecture, so do not "simplify" it by moving TLS to the VPS.
+{
+	email {$ACME_EMAIL}
+
+	# Only :443 is relayed through the tunnel, so nothing can ever reach a
+	# plain-HTTP vhost. Turn off the automatic HTTP→HTTPS redirect listener
+	# rather than leaving it bound to a port no packet will arrive on.
+	auto_https disable_redirects
+
+	servers {
+		listener_wrappers {
+			# frps forwards the real client IP in a PROXY protocol v2 header
+			# (frpc.toml sets transport.proxyProtocolVersion). Without this
+			# wrapper every request would appear to come from frpc's address
+			# on the compose network, and the API's rate limiter would bucket
+			# all users together.
+			#
+			# `allow` is the Docker bridge range: only frpc may assert a
+			# client IP. Order matters — proxy_protocol must precede tls.
+			proxy_protocol {
+				allow 172.16.0.0/12
+			}
+			tls
+		}
+	}
+}
+
+{$API_DOMAIN} {
+	tls {
+		issuer acme {
+			# Certificates are obtained over TLS-ALPN-01 on :443, which works
+			# straight through the TCP passthrough. The HTTP-01 challenge
+			# cannot work here (no :80 is relayed), so disable it instead of
+			# letting Caddy waste a retry cycle on it every renewal.
+			disable_http_challenge
+		}
+	}
+
+	encode gzip
+
+	reverse_proxy app:3000 {
+		header_up X-Real-IP {remote_host}
+	}
+}

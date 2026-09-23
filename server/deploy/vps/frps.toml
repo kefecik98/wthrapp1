@@ -1,0 +1,18 @@
+# frp server — runs on the VPS.
+#
+# Accepts the outbound tunnel from the rack and republishes it on :443.
+
+bindPort = {{ .Envs.FRP_BIND_PORT | default "7000" }}
+
+auth.method = "token"
+auth.token = "{{ .Envs.FRP_TOKEN }}"
+
+# Only let a client claim port 443. Without this a leaked token would let
+# anyone expose arbitrary ports from this host.
+allowPorts = [{ single = 443 }]
+
+# One tunnel, one client. Refuse anything beyond that.
+maxPortsPerClient = 1
+
+log.to = "console"
+log.level = "info"

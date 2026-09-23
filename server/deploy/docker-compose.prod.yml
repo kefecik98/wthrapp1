@@ -1,0 +1,95 @@
+# WeatherAlert production stack — runs on the rack's app VM.
+#
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# Four containers, none of which need an inbound port on your router:
+#
+#   db    Postgres 16. No published ports — only the compose network reaches it.
+#   app   The API + alert engine. Published on loopback only, for health checks.
+#   caddy Terminates TLS. Holds the only copy of the private key.
+#   frpc  Dials OUT to the VPS and relays :443 back to caddy.
+#
+# Traffic path:  phone → VPS:443 (frps, raw TCP) → tunnel → caddy → app → db
+#
+# Config comes from `.env` in this directory (copy .env.example). Compose uses
+# that same file both for ${...} substitution here and as the app's runtime
+# environment, so there is exactly one file to fill in.
+name: weatheralert
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: weather
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}
+      POSTGRES_DB: weather_app
+    volumes:
+      # Bind-mount onto the VM's second virtual disk, so the database can be
+      # snapshotted in Proxmox independently of the OS disk and survives a
+      # rebuild of the VM.
+      - ${DATA_DIR:-/srv/weatheralert}/pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U weather -d weather_app"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    # Deliberately no `ports:` — Postgres is reachable only on the internal
+    # compose network, which replaces the listen_addresses/pg_hba tuning the
+    # old native runbook needed.
+
+  app:
+    image: ${APP_IMAGE:?set APP_IMAGE in deploy/.env}:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # These four override anything in .env because they are container-shaped,
+      # not host-shaped, and getting them wrong is the classic containerisation
+      # bug: `db` is the compose service name, not localhost, and the Firebase
+      # credentials live at their in-container path.
+      DATABASE_URL: postgresql://weather:${POSTGRES_PASSWORD}@db:5432/weather_app
+      GOOGLE_APPLICATION_CREDENTIALS: /app/firebase-service-account.json
+      NODE_ENV: production
+      # Caddy sets X-Forwarded-For; without this every rate-limit bucket keys
+      # on the proxy's own IP instead of the real client.
+      TRUST_PROXY: "true"
+    volumes:
+      - ../firebase-service-account.json:/app/firebase-service-account.json:ro
+    ports:
+      # Loopback only. Not reachable off the VM; this exists so deploy.sh and
+      # you can curl /health without going out through the tunnel and back.
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      API_DOMAIN: ${API_DOMAIN:?set API_DOMAIN in deploy/.env}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in deploy/.env}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data      # issued certificates and ACME account keys
+      - caddy_config:/config
+    depends_on:
+      - app
+    # No published ports either: frpc reaches caddy over the compose network.
+
+  frpc:
+    image: snowdreamtech/frpc:${FRP_VERSION:?set FRP_VERSION in deploy/.env}
+    restart: unless-stopped
+    environment:
+      FRP_SERVER_ADDR: ${FRP_SERVER_ADDR:?set FRP_SERVER_ADDR in deploy/.env}
+      FRP_SERVER_PORT: ${FRP_SERVER_PORT:-7000}
+      FRP_TOKEN: ${FRP_TOKEN:?set FRP_TOKEN in deploy/.env}
+    volumes:
+      - ./frp/frpc.toml:/etc/frp/frpc.toml:ro
+    depends_on:
+      - caddy
+
+volumes:
+  caddy_data:
+  caddy_config:

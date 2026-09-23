@@ -1,0 +1,32 @@
+# frp client — runs on the rack, dials OUT to the VPS.
+#
+# This is what removes the need for any inbound port on your router: the
+# connection is established from the inside out, exactly like the GitHub
+# Actions runner. Values come from environment variables set by compose.
+
+serverAddr = "{{ .Envs.FRP_SERVER_ADDR }}"
+serverPort = {{ .Envs.FRP_SERVER_PORT }}
+
+auth.method = "token"
+auth.token = "{{ .Envs.FRP_TOKEN }}"
+
+# Reconnect aggressively; a dropped tunnel means the API is unreachable.
+transport.dialServerTimeout = 10
+transport.heartbeatInterval = 30
+transport.heartbeatTimeout = 90
+
+log.to = "console"
+log.level = "info"
+
+[[proxies]]
+name = "weatheralert-https"
+type = "tcp"
+# Where to send the relayed bytes: the caddy container on the compose network.
+localIP = "caddy"
+localPort = 443
+# The port frps opens on the VPS's public interface.
+remotePort = 443
+# Prepend a PROXY protocol v2 header so Caddy can recover the real client IP.
+# Caddy must have the matching proxy_protocol listener wrapper, or every
+# request will fail to parse. Change these two together or not at all.
+transport.proxyProtocolVersion = "v2"
