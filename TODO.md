@@ -469,10 +469,16 @@ Plan:
 - [ ] A week of numbers: `vnstat -d` daily download (first ingest ~23 GB
       incl. history backfill), disk growth (~46 GB day one), NBM success
       once NOAA's AWS feed recovers (stalled the morning of 2026-09-24).
-- [ ] (K) Proxmox firewall for the weather VM: currently off, so SSH (432)
-      and the API (8083) are reachable from the whole LAN. Enable at VM
-      level (datacenter policy ACCEPT to avoid locking out the host), allow
-      432 from the workstation and 8083 from the app VM only.
+- [x] Weather VM SSH hardened (2026-09-24): key-only login
+      (`PasswordAuthentication no`, `KbdInteractiveAuthentication no`,
+      `PermitRootLogin no`), verified from outside. No Proxmox firewall —
+      accepted for now.
+- [ ] Before `WEATHER_PROVIDER=pirate` goes live: restrict the weather API
+      (8083) to the app VM. It is currently reachable from the whole LAN
+      (weather data only, not internet-facing — accepted risk until the app
+      depends on it). Either the Proxmox VM firewall (datacenter policy
+      ACCEPT so the host isn't locked out) or one `DOCKER-USER` iptables
+      rule on the VM — Docker bypasses ufw.
 - [ ] (DECISION) Rain threshold vs. real HRRR output: HRRR's minutely
       drizzle is often 0.1–0.2 mm/h, below the "light" threshold of
       0.25 mm/h (`findNextEvent`). Light-rain users won't be alerted for
