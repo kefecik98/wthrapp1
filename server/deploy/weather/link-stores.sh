@@ -30,7 +30,9 @@ linked=0
 shopt -s nullglob
 for store in ../Prod/*/"${VERSION}"/*.zarr; do
   name="$(basename "${store}")"
-  case "${name}" in *_Maps.zarr) continue ;; esac # map tiles, not forecasts
+  # Map tiles, not forecasts. Upstream isn't consistent about the case:
+  # GFS writes GFS_Maps.zarr, HRRR writes HRRR_maps.zarr.
+  case "${name,,}" in *_maps.zarr) continue ;; esac
   ln -sfn "${store}" "${name}"
   echo "linked ${name} -> ${store}"
   linked=$((linked + 1))
