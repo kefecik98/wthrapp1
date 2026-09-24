@@ -232,7 +232,7 @@ Nothing else inbound. There is no port forward and no internet exposure.
 From the **app VM** (proves the firewall lets it through):
 
 ```bash
-curl -s "http://<WEATHER_IP>:8083/forecast/local/47.595,-122.325?units=si&exclude=currently,daily,alerts" \
+curl -s "http://<WEATHER_IP>:8083/forecast/local/47.595,-122.325?units=si&version=2&exclude=currently,daily,alerts" \
   | python3 -m json.tool | less
 ```
 
@@ -262,7 +262,7 @@ The adapter's test fixture is hand-built. Replace it with a real response so
 the tests run against what this instance actually returns:
 
 ```bash
-curl -s "http://<WEATHER_IP>:8083/forecast/local/47.595,-122.325?units=si&exclude=currently,daily,alerts" \
+curl -s "http://<WEATHER_IP>:8083/forecast/local/47.595,-122.325?units=si&version=2&exclude=currently,daily,alerts" \
   > server/src/services/providers/fixtures/pirateWeather.sample.json
 cd server && npx vitest run src/services/providers
 ```

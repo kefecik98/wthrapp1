@@ -2,8 +2,10 @@
 // LAN (server/deploy/weather/), though it works against the hosted API too.
 //
 // Pirate Weather speaks the Dark Sky format: GET
-// /forecast/<key>/<lat>,<lng>?units=si returns `minutely` (61 one-minute
-// points) and `hourly` blocks with unix-second times. This converts that into
+// /forecast/<key>/<lat>,<lng>?units=si&version=2 returns `minutely` (61
+// one-minute points) and `hourly` blocks with unix-second times. version=2
+// is required: the default (v1) hourly block has no `cape`, which thunder
+// is derived from (confirmed against the self-hosted instance). This converts that into
 // ForecastMinute, which is a wire contract with installed apps — so every
 // difference is absorbed here, never pushed into the shared shape:
 //
@@ -149,6 +151,8 @@ export async function fetchMinutely(
     `${baseUrl.replace(/\/+$/, "")}/forecast/${encodeURIComponent(apiKey)}/${lat},${lng}`,
   );
   url.searchParams.set("units", "si");
+  // v1 hourly omits `cape`, so thunder could never be derived. See header.
+  url.searchParams.set("version", "2");
   // Only minutely + hourly are read; skip the rest to keep responses small.
   url.searchParams.set("exclude", "currently,daily,alerts");
 

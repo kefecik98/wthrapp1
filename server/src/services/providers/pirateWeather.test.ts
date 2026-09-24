@@ -167,6 +167,9 @@ describe("fetchMinutely", () => {
       new RegExp(`/forecast/${config.pirateWeather.apiKey}/47\\.595,-122\\.325$`),
     );
     expect(url.searchParams.get("units")).toBe("si");
+    // Without version=2 the hourly block has no `cape` (seen on the real
+    // instance), which would silently disable thunder alerts.
+    expect(url.searchParams.get("version")).toBe("2");
     expect(url.searchParams.get("exclude")).toBe("currently,daily,alerts");
   });
 
