@@ -167,9 +167,31 @@ docker compose logs -f  # in a second tmux window
 ```
 
 Upstream chains the jobs with `depends_on: service_completed_successfully`,
-so `up` waits for all nine and one failure stops the rest. Ofelia (the
-scheduler) only starts once every ingest job has finished once. When
-`docker compose ps` shows it running, check the output:
+so `up` waits for all nine and **one failure stops the rest**. The chain is
+only there to run them one at a time — no job reads another's output — so
+if one fails, run the others individually instead of waiting on it:
+
+```bash
+for svc in subh_ingest gefs_ingest hrrr_ingest hrrr_6h_ingest \
+           nws_alerts_ingest ecmwf_ingest rtma-ru-ingest nbm_ingest; do
+  docker compose up -d --no-deps "$svc"
+  echo "$svc exit $(docker wait "$(docker compose ps -a -q "$svc")")"
+done
+```
+
+What we hit on the first run (2026-09-23):
+
+- **GFS** backfills ~12 days of history on its first run: ~48 runs, **~29 GB**
+  under `Weather/Hist/GFS`. Expect the volume to fill faster at first.
+- **NBM** can fail with `403 Forbidden` from `nomads.ncep.noaa.gov`. The
+  script picks the newest run available on *any* source, but NOAA's AWS
+  bucket lags NOMADS by an hour or more, so a run that exists only on
+  NOMADS gets fetched from there — and NOMADS rate-limits hard. It clears
+  once AWS catches up; the scheduled runs retry every two hours anyway.
+
+Ofelia (the scheduler) only starts once every ingest job has finished once
+(or start it yourself with `docker compose up -d --no-deps ofelia`). Then
+check the output:
 
 ```bash
 find /srv/pirate-weather/Weather/Prod -maxdepth 3 -name '*.zarr' | sort
