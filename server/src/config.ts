@@ -24,7 +24,7 @@ function optional(name: string, fallback: string): string {
  * Weather providers that have an adapter in services/providers. The registry
  * there is typed against this list, so the two can't drift apart.
  */
-export const WEATHER_PROVIDERS = ["tomorrow"] as const;
+export const WEATHER_PROVIDERS = ["tomorrow", "pirate"] as const;
 export type WeatherProviderName = (typeof WEATHER_PROVIDERS)[number];
 
 /** WEATHER_PROVIDER, validated against the providers we have adapters for. */
@@ -60,6 +60,10 @@ function flag(name: string, fallback = false): boolean {
   return value.toLowerCase() === "true";
 }
 
+// Resolved up front: which provider is live decides which provider's
+// credentials are required at startup.
+const weatherProvider = weatherProviderName();
+
 export const config = {
   env: optional("NODE_ENV", "development"),
   port: Number(optional("PORT", "3000")),
@@ -89,14 +93,31 @@ export const config = {
   weather: {
     // Which adapter in services/providers serves forecasts. Switching is a
     // config change + restart; every caller goes through the seam.
-    provider: weatherProviderName(),
+    provider: weatherProvider,
   },
 
   tomorrow: {
-    apiKey: required("TOMORROW_API_KEY"),
+    // Required only while Tomorrow.io is the live provider.
+    apiKey:
+      weatherProvider === "tomorrow"
+        ? required("TOMORROW_API_KEY")
+        : optional("TOMORROW_API_KEY", ""),
     baseUrl: optional("TOMORROW_BASE_URL", "https://api.tomorrow.io/v4"),
     // Abort a forecast request that hangs, so it can't stall an alert cycle.
     timeoutMs: Number(optional("TOMORROW_TIMEOUT_MS", "10000")),
+  },
+
+  pirateWeather: {
+    // A self-hosted instance on the LAN, e.g. http://10.0.0.20:8083 (see
+    // server/deploy/weather/). Required only while Pirate Weather is live.
+    baseUrl:
+      weatherProvider === "pirate"
+        ? required("PIRATE_WEATHER_BASE_URL")
+        : optional("PIRATE_WEATHER_BASE_URL", ""),
+    // The API path always carries a key segment. A self-hosted instance
+    // ignores its value; the hosted service needs a real key.
+    apiKey: optional("PIRATE_WEATHER_API_KEY", "local"),
+    timeoutMs: Number(optional("PIRATE_WEATHER_TIMEOUT_MS", "10000")),
   },
 
   forecast: {

@@ -28,9 +28,31 @@ describe("WEATHER_PROVIDER", () => {
   });
 
   it("rejects a provider with no adapter at startup", async () => {
-    await expect(loadConfigWith({ WEATHER_PROVIDER: "pirate" })).rejects.toThrow(
-      /WEATHER_PROVIDER must be one of tomorrow/,
+    await expect(loadConfigWith({ WEATHER_PROVIDER: "bogus" })).rejects.toThrow(
+      /WEATHER_PROVIDER must be one of tomorrow, pirate/,
     );
+  });
+
+  it("requires PIRATE_WEATHER_BASE_URL when Pirate Weather is live", async () => {
+    await expect(
+      loadConfigWith({ WEATHER_PROVIDER: "pirate", PIRATE_WEATHER_BASE_URL: "" }),
+    ).rejects.toThrow(/PIRATE_WEATHER_BASE_URL/);
+  });
+
+  it("does not require a Tomorrow.io key when Pirate Weather is live", async () => {
+    const config = await loadConfigWith({
+      WEATHER_PROVIDER: "pirate",
+      PIRATE_WEATHER_BASE_URL: "http://10.0.0.20:8083",
+      TOMORROW_API_KEY: "",
+    });
+    expect(config.weather.provider).toBe("pirate");
+    expect(config.pirateWeather.baseUrl).toBe("http://10.0.0.20:8083");
+  });
+
+  it("still requires the Tomorrow.io key while Tomorrow.io is live", async () => {
+    await expect(
+      loadConfigWith({ WEATHER_PROVIDER: "tomorrow", TOMORROW_API_KEY: "" }),
+    ).rejects.toThrow(/TOMORROW_API_KEY/);
   });
 });
 

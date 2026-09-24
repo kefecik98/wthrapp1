@@ -445,9 +445,44 @@ Plan:
       moved behind it, `TomorrowMinute` → `ForecastMinute` (same wire
       shape), `WEATHER_PROVIDER` config (validated at startup), cache keys
       scoped by provider name. No behaviour change.
-- [ ] Pirate Weather adapter + fixture tests (hosted API key is enough to
-      build against). Make `TOMORROW_API_KEY` required only when Tomorrow.io
-      is the live or shadow provider.
+- [x] Pirate Weather adapter (branch `pirate-weather-adapter`):
+      `services/providers/pirateWeather.ts` converts the Dark Sky-format
+      response into `ForecastMinute` (unix → ISO, precipType strings →
+      codes, probability ×100, wind from the matching hourly point, thunder
+      from hourly CAPE ≥ 2500 J/kg while precipitating, `-999` → no data).
+      `WEATHER_PROVIDER=pirate` + `PIRATE_WEATHER_BASE_URL`; each provider's
+      credentials are required only while it is live. Tests use a
+      **hand-built** fixture — replace it with a real capture (runbook §8).
+- [x] Weather VM runbook: `server/deploy/weather/` (README, compose
+      override adding the API server, `link-stores.sh`). Pinned to Pirate
+      Weather v0.7.2. Written from their code, **not yet run**.
+- [x] Weather VM up (2026-09-24): `jupiter`, 192.168.155.30, 12 vCPU /
+      62 GB, 380 GB LVM data volume, SSH on 432 with a dedicated `claude`
+      user. All nine ingest jobs scheduled; API serving real forecasts with
+      the 15-minute HRRR (`hrrrsubh`) for US points. Bring-up found and
+      fixed: upstream cross-mount `os.rename` bug (compose override), API
+      needs `version=2` for CAPE, map-tile naming, root-owned store cleanup.
+      Answered: output layout matches `link-stores.sh`; the API serves new
+      data without a restart.
+- [x] Adapter contract tests over real responses (`fixtures/*.real.json`),
+      including a real "rain at 0 mm/h" case the adapter must not alert on.
+- [ ] A week of numbers: `vnstat -d` daily download (first ingest ~23 GB
+      incl. history backfill), disk growth (~46 GB day one), NBM success
+      once NOAA's AWS feed recovers (stalled the morning of 2026-09-24).
+- [x] Weather VM SSH hardened (2026-09-24): key-only login
+      (`PasswordAuthentication no`, `KbdInteractiveAuthentication no`,
+      `PermitRootLogin no`), verified from outside. No Proxmox firewall —
+      accepted for now.
+- [ ] Before `WEATHER_PROVIDER=pirate` goes live: restrict the weather API
+      (8083) to the app VM. It is currently reachable from the whole LAN
+      (weather data only, not internet-facing — accepted risk until the app
+      depends on it). Either the Proxmox VM firewall (datacenter policy
+      ACCEPT so the host isn't locked out) or one `DOCKER-USER` iptables
+      rule on the VM — Docker bypasses ufw.
+- [ ] (DECISION) Rain threshold vs. real HRRR output: HRRR's minutely
+      drizzle is often 0.1–0.2 mm/h, below the "light" threshold of
+      0.25 mm/h (`findNextEvent`). Light-rain users won't be alerted for
+      it. Decide during shadow mode whether "light" should be lower.
 - [ ] Shadow mode: the engine also evaluates the second provider and logs
       disagreements (would-alert / wouldn't, and start-time delta) without
       sending. Run 2–4 weeks covering real precipitation events.
