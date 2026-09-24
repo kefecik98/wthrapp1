@@ -456,12 +456,27 @@ Plan:
 - [x] Weather VM runbook: `server/deploy/weather/` (README, compose
       override adding the API server, `link-stores.sh`). Pinned to Pirate
       Weather v0.7.2. Written from their code, **not yet run**.
-- [ ] (K) Create the weather VM and run the runbook's first ingest.
-      Separate VM on purpose: ≥32 GB free RAM per ingest, and Ofelia mounts
-      the Docker socket.
-- [ ] Runbook **VERIFY** items on first run: ingest output layout; whether
-      the API serves fresh data without a restart; `flags` source names;
-      a week of `vnstat` download volume.
+- [x] Weather VM up (2026-09-24): `jupiter`, 192.168.155.30, 12 vCPU /
+      62 GB, 380 GB LVM data volume, SSH on 432 with a dedicated `claude`
+      user. All nine ingest jobs scheduled; API serving real forecasts with
+      the 15-minute HRRR (`hrrrsubh`) for US points. Bring-up found and
+      fixed: upstream cross-mount `os.rename` bug (compose override), API
+      needs `version=2` for CAPE, map-tile naming, root-owned store cleanup.
+      Answered: output layout matches `link-stores.sh`; the API serves new
+      data without a restart.
+- [x] Adapter contract tests over real responses (`fixtures/*.real.json`),
+      including a real "rain at 0 mm/h" case the adapter must not alert on.
+- [ ] A week of numbers: `vnstat -d` daily download (first ingest ~23 GB
+      incl. history backfill), disk growth (~46 GB day one), NBM success
+      once NOAA's AWS feed recovers (stalled the morning of 2026-09-24).
+- [ ] (K) Proxmox firewall for the weather VM: currently off, so SSH (432)
+      and the API (8083) are reachable from the whole LAN. Enable at VM
+      level (datacenter policy ACCEPT to avoid locking out the host), allow
+      432 from the workstation and 8083 from the app VM only.
+- [ ] (DECISION) Rain threshold vs. real HRRR output: HRRR's minutely
+      drizzle is often 0.1–0.2 mm/h, below the "light" threshold of
+      0.25 mm/h (`findNextEvent`). Light-rain users won't be alerted for
+      it. Decide during shadow mode whether "light" should be lower.
 - [ ] Shadow mode: the engine also evaluates the second provider and logs
       disagreements (would-alert / wouldn't, and start-time delta) without
       sending. Run 2–4 weeks covering real precipitation events.

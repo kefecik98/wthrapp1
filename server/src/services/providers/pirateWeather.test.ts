@@ -1,9 +1,12 @@
 // Pirate Weather adapter tests. fetch is stubbed, so nothing hits a server.
 //
-// fixtures/pirateWeather.sample.json is hand-built from the documented Dark
-// Sky format, not captured. Once the self-hosted instance runs, replace it
-// with a real response (see server/deploy/weather/README.md) — these tests
-// must still pass against it.
+// Two kinds of fixture:
+// - pirateWeather.sample.json is hand-built from the documented Dark Sky
+//   format, to cover cases real weather rarely offers on demand (snow,
+//   thunder, wind, missing data).
+// - *.real.json are real responses from the self-hosted instance, captured
+//   with the adapter's exact query (server/deploy/weather/README.md step 8).
+//   The contract tests at the bottom run over every one of them.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { config } from "../../config";
@@ -206,5 +209,77 @@ describe("pirateWeatherProvider", () => {
   it("is registered under the WEATHER_PROVIDER name", () => {
     expect(pirateWeatherProvider.name).toBe("pirate");
     expect(pirateWeatherProvider.fetchMinutely).toBe(fetchMinutely);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Contract tests against REAL responses from the self-hosted instance
+// (fixtures/*.real.json, captured with the adapter's exact query). If a
+// Pirate Weather upgrade changes the response, these are what should break.
+// ---------------------------------------------------------------------------
+
+import miami from "./fixtures/pirateWeather.miami.real.json";
+import stlouis from "./fixtures/pirateWeather.stlouis.real.json";
+
+const REAL: [string, PirateResponse & { flags: { sources: string[] } }][] = [
+  ["Miami — light rain ending after 12 min", miami],
+  ["St. Louis — typed 'rain' at 0 mm/h, never raining", stlouis],
+];
+
+describe.each(REAL)("real response: %s", (_name, body) => {
+  const minutes = toForecastMinutes(body);
+
+  it("was served by the 15-minute HRRR (the source minutely alerts need)", () => {
+    expect(body.flags.sources).toContain("hrrrsubh");
+  });
+
+  it("converts all 61 minutes, one per minute, in order", () => {
+    expect(minutes).toHaveLength(61);
+    for (let i = 1; i < minutes.length; i++) {
+      expect(Date.parse(minutes[i].time) - Date.parse(minutes[i - 1].time)).toBe(60_000);
+    }
+  });
+
+  it("emits only valid ForecastMinute values", () => {
+    for (const { values: v } of minutes) {
+      expect([0, 1, 2, 3, 4]).toContain(v.precipitationType);
+      expect(v.precipitationIntensity).toBeGreaterThanOrEqual(0);
+      expect(Number.isInteger(v.precipitationProbability)).toBe(true);
+      expect(v.precipitationProbability).toBeGreaterThanOrEqual(0);
+      expect(v.precipitationProbability).toBeLessThanOrEqual(100);
+      expect(v.windSpeed).toBeGreaterThanOrEqual(0);
+      expect([0, 100]).toContain(v.thunderstormProbability);
+    }
+  });
+
+  it("never reports a precipitation type without intensity", () => {
+    for (const { values: v } of minutes) {
+      expect(v.precipitationType !== 0).toBe(v.precipitationIntensity > 0);
+    }
+  });
+
+  it("has hourly CAPE (only present with version=2)", () => {
+    expect(body.hourly?.data?.[0]).toHaveProperty("cape");
+  });
+});
+
+describe("real response specifics", () => {
+  it("Miami: rain now, gone by minute 12", () => {
+    const minutes = toForecastMinutes(miami);
+    expect(minutes[0].values.precipitationType).toBe(1);
+    expect(minutes[0].values.precipitationIntensity).toBeGreaterThan(0);
+    expect(minutes.slice(12).every((m) => m.values.precipitationType === 0)).toBe(true);
+  });
+
+  it("St. Louis: 'rain' at 0 mm/h produces no precipitation", () => {
+    // Real Pirate Weather output: many minutes are typed "rain" while the
+    // intensity is 0 all hour. Passed through, the engine would alert on it.
+    const typedAtZero = stlouis.minutely.data.filter(
+      (m) => m.precipType !== "none" && m.precipIntensity === 0,
+    );
+    expect(typedAtZero.length).toBeGreaterThan(0);
+    expect(stlouis.minutely.data.every((m) => m.precipIntensity === 0)).toBe(true);
+    const minutes = toForecastMinutes(stlouis);
+    expect(minutes.every((m) => m.values.precipitationType === 0)).toBe(true);
   });
 });

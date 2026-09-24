@@ -5,10 +5,10 @@ ECMWF) and serves forecasts to the WeatherAlert app VM over the LAN. It
 replaces Tomorrow.io once shadow mode shows it's good enough (`TODO.md`,
 "Pirate Weather migration").
 
-> **Status: first bring-up, not yet run.** Pirate Weather's own README calls
-> self-hosting "very beta" and warns of "instabilities or data errors". Every
-> step marked **VERIFY** is something that could only be read from their code,
-> not tested. Expect to adjust on the first run.
+> **Status: running on `jupiter` (192.168.155.30) since 2026-09-24.** Brought
+> up by following this runbook; every fix that took is folded in below.
+> Pirate Weather's own README still calls self-hosting "very beta" — watch
+> the sources check in step 7, and step 9's numbers, for the first week.
 
 ```
   NOAA / ECMWF open data (S3, HTTPS)
@@ -186,8 +186,11 @@ What we hit on the first run (2026-09-23):
 - **NBM** can fail with `403 Forbidden` from `nomads.ncep.noaa.gov`. The
   script picks the newest run available on *any* source, but NOAA's AWS
   bucket lags NOMADS by an hour or more, so a run that exists only on
-  NOMADS gets fetched from there — and NOMADS rate-limits hard. It clears
-  once AWS catches up; the scheduled runs retry every two hours anyway.
+  NOMADS gets fetched from there — and NOMADS rate-limits hard (403, then
+  302s once it has throttled you). It clears once AWS catches up; the
+  scheduled runs retry every two hours. On 2026-09-24 NOAA's AWS NBM feed
+  stalled entirely for 6+ hours, so NBM failed every attempt that morning.
+  With HRRR present, the API still serves good US forecasts without NBM.
 
 Ofelia (the scheduler) only starts once every ingest job has finished once
 (or start it yourself with `docker compose up -d --no-deps ofelia`). Then
@@ -197,9 +200,18 @@ check the output:
 find /srv/pirate-weather/Weather/Prod -maxdepth 3 -name '*.zarr' | sort
 ```
 
-**VERIFY:** expect `Prod/<MODEL>/v30/<Name>.zarr` per model (e.g.
-`Prod/GFS/v30/GFS.zarr`, `Prod/RTMA-RU/v30/RTMA_RU.zarr`). If the layout
-differs, `link-stores.sh` needs adjusting.
+Expect `Prod/<MODEL>/v30/<Name>.zarr` per model (e.g. `Prod/GFS/v30/GFS.zarr`,
+`Prod/RTMA-RU/v30/RTMA_RU.zarr`) — confirmed on the first run. Map tiles
+(`GFS_Maps.zarr`, `HRRR_maps.zarr`) sit alongside; `link-stores.sh` skips them.
+
+The ingest containers run as root, so everything under `Weather/` and
+`Work/` is root-owned. To delete a broken store (e.g. a partial history file
+that makes a job fail every run), go through a container rather than sudo:
+
+```bash
+docker run --rm --network none -v /srv/pirate-weather/Weather/Hist/HRRR:/hist \
+  --entrypoint rm pirateingest:latest -rf /hist/<broken>.zarr /hist/<broken>.done
+```
 
 Link them to the names the API expects, then start the API:
 
@@ -240,35 +252,43 @@ Check:
 
 - `minutely.data` has 61 points with `time`, `precipIntensity`,
   `precipProbability`, `precipType`.
-- `hourly.data` has `windSpeed` and `cape` (the adapter derives thunder
-  from `cape`).
-- Missing values show as `-999`, not `NaN` (the adapter treats negatives as
-  no data).
-- `flags` lists the sources used. For a US point, expect the sub-hourly
-  HRRR; elsewhere, GFS/ECMWF.
+- `hourly.data` has `windSpeed` and `cape`. **`cape` only appears with
+  `version=2`** — the adapter always sends it; without it thunder alerts
+  can never fire.
+- **`flags.sources` includes `hrrrsubh` for a US point.** That is the
+  15-minute HRRR the minutely forecast needs. The API silently drops it when:
+  - its run is **more than 4 hours old** — i.e. the hourly SubH ingest has
+    stopped succeeding; or
+  - HRRR (or, when HRRR is also missing, NBM) data can't be read — it then
+    falls back to GFS for everything.
+
+  Without `hrrrsubh`, alerts still work but from hourly models, which is
+  exactly the precision loss this whole setup exists to avoid. Check it
+  whenever something looks off; it is the single best health signal.
 
 From a machine that is **not** the app VM, the same `curl` must time out.
 
-**VERIFY — freshness.** The API opens its stores once at startup, and ingest
-overwrites them in place. Whether new data is served without a restart is
-unclear from the code. Check twice, a few hours apart: the model run times
-in `flags` should advance. If they don't, add a scheduled `docker restart
-pirate-api` after the sub-hourly ingest, accepting a few minutes of
-unavailability each time (the app's cache rides out short gaps).
+**Freshness — confirmed.** The API serves new data as soon as an ingest
+finishes, without a restart (seen for RTMA-RU and SubH on the first day):
+`flags.sourceTimes` advances on its own. Only re-run `link-stores.sh` and
+restart `pw_api` when a *new* model appears for the first time.
 
 ## 8. Capture a real fixture
 
-The adapter's test fixture is hand-built. Replace it with a real response so
-the tests run against what this instance actually returns:
+`server/src/services/providers/fixtures/` holds **real** responses from this
+instance (`*.real.json`, captured 2026-09-24: Miami with rain ending, St.
+Louis typed "rain" at 0 mm/h) alongside the hand-built sample. The contract
+tests run the adapter over every real capture. After upgrading Pirate
+Weather, capture fresh ones with the adapter's exact query and re-run:
 
 ```bash
-curl -s "http://<WEATHER_IP>:8083/forecast/local/47.595,-122.325?units=si&version=2&exclude=currently,daily,alerts" \
-  > server/src/services/providers/fixtures/pirateWeather.sample.json
+curl -s "http://<WEATHER_IP>:8083/forecast/local/<lat>,<lng>?units=si&version=2&exclude=currently,daily,alerts" \
+  > server/src/services/providers/fixtures/pirateWeather.<place>.real.json
 cd server && npx vitest run src/services/providers
 ```
 
-Some assertions reference specific minutes of the hand-built sample; update
-them to the captured data, but keep every behaviour they test.
+Pick a point where it is precipitating — scan a few cities against this
+instance; it costs nothing.
 
 ## 9. Measure before committing
 
@@ -280,8 +300,11 @@ du -sh /srv/pirate-weather/Weather /srv/pirate-weather/Work
 docker stats --no-stream                  # peak memory during an ingest run
 ```
 
-The download volume is the number nobody has measured yet. Record it in
-`TODO.md`.
+First-day numbers (2026-09-24): the first full ingest downloaded **~23 GB**
+(including ~12 days of GFS history backfill); **~46 GB** on the volume after
+the first scheduled cycles; peak RAM **~21 GB** of 62. Steady-state daily
+download is still unknown — read it from `vnstat -d` after a week and
+record it in `TODO.md`.
 
 ## 10. Connect WeatherAlert
 
